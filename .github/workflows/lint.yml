@@ -31,7 +31,9 @@ jobs:
           go-version-file: 'go.mod'
           check-latest: true
       - name: Lint
-        run: make vet
+        run: |
+          golint ./...
+          go vet -all ./...
       #- name: golangci-lint
       #  uses: golangci/golangci-lint-action@v8
       #  with:
