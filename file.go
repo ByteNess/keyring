@@ -8,7 +8,7 @@ import (
 	"time"
 
 	jose "github.com/dvsekhvalnov/jose2go"
-	"github.com/mtibben/percent"
+	"github.com/byteness/percent"
 )
 
 func init() {
