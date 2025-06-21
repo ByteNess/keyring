@@ -1,0 +1,35 @@
+on:
+  push:
+    tags:
+      - 'v*'
+    #tag-ignore:
+    #  - 'v*'
+  workflow_dispatch: {}
+
+env:
+  GOTELEMETRY: off
+  CGO_ENABLED: 0
+
+permissions:
+  contents: write
+
+name: Release
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2.2.2
+        with:
+          #files: |
+          #  dist/**
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          #body: "Changelog of release ${{ github.ref_name }}."
+          #append_body: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
