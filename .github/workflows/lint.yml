@@ -1,19 +1,37 @@
 name: golangci-lint
-on: push
+on:
+  push: {}
+  #  branches-ignore:
+  #    - main
+  pull_request:
+    branches:
+      - main
+permissions:
+  contents: read
+
+env:
+  GOTELEMETRY: off
+  #CGO_ENABLED: 0
+
 jobs:
-  golangci:
+    permissions:
+      contents: read  # for actions/checkout to fetch code
+      pull-requests: read  # for golangci/golangci-lint-action to fetch pull requests
+    name: lint
     strategy:
       matrix:
-        go-version: [1.19]
-        os: [macos-latest, windows-latest, ubuntu-latest]
-    name: lint
+        os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-go@v2
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version: 1.19
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v2
-        with:
-          version: v1.50.1
+          #go-version: '1.20'
+          go-version-file: 'go.mod'
+          check-latest: true
+      - name: Lint
+        run: make vet
+      #- name: golangci-lint
+      #  uses: golangci/golangci-lint-action@v8
+      #  with:
+      #    version: v2.1
