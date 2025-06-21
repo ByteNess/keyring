@@ -14,10 +14,11 @@ env:
   #CGO_ENABLED: 0
 
 jobs:
-  permissions:
-    contents: read  # for actions/checkout to fetch code
-    pull-requests: read  # for golangci/golangci-lint-action to fetch pull requests
-  name: lint
+  lint:
+    permissions:
+      contents: read  # for actions/checkout to fetch code
+      pull-requests: read  # for golangci/golangci-lint-action to fetch pull requests
+    name: lint
     strategy:
       matrix:
         os: [macos-latest, ubuntu-latest]
