@@ -164,7 +164,7 @@ func TestPassKeyringRemoveWhenNotEmpty(t *testing.T) {
 	}
 
 	if err := k.Remove(item.Key); err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 
 	keys, err := k.Keys()
