@@ -1,9 +1,13 @@
 Keyring
 =======
-[![Build Status](https://github.com/99designs/keyring/workflows/Continuous%20Integration/badge.svg)](https://github.com/99designs/keyring/actions)
-[![Documentation](https://godoc.org/github.com/99designs/keyring?status.svg)](https://godoc.org/github.com/99designs/keyring)
+[![Build Status](https://github.com/byteness/keyring/workflows/Continuous%20Integration/badge.svg)](https://github.com/byteness/keyring/actions)
+[![Documentation](https://godoc.org/github.com/byteness/keyring?status.svg)](https://godoc.org/github.com/byteness/keyring)
 
-Keyring provides a common interface to a range of secure credential storage services. Originally developed as part of [AWS Vault](https://github.com/99designs/aws-vault), a command line tool for securely managing AWS access from developer workstations.
+> [!NOTE]
+> This is a maintained fork of https://github.com/99designs/keyring which seems to be an abandoned project.
+> Contributions are welcome, but keep in mind this is a side project and maintained on best effort basis!
+
+Keyring provides a common interface to a range of secure credential storage services. Originally developed as part of [AWS Vault](https://github.com/byteness/aws-vault), a command line tool for securely managing AWS access from developer workstations.
 
 Currently Keyring supports the following backends
  * [macOS Keychain](https://support.apple.com/en-au/guide/keychain-access/welcome/mac)
@@ -34,7 +38,7 @@ i, _ := ring.Get("foo")
 fmt.Printf("%s", i.Data)
 ```
 
-For more detail on the API please check [the keyring godocs](https://godoc.org/github.com/99designs/keyring)
+For more detail on the API please check [the keyring godocs](https://godoc.org/github.com/byteness/keyring)
 
 
 ## Testing
@@ -54,7 +58,7 @@ vagrant up
 
 Contributions to the keyring package are most welcome from engineers of all backgrounds and skill levels. In particular the addition of extra backends across popular operating systems would be appreciated.
 
-This project will adhere to the [Go Community Code of Conduct](https://golang.org/conduct) in the github provided discussion spaces, with the moderators being the 99designs engineering team.
+This project will adhere to the [Go Community Code of Conduct](https://golang.org/conduct) in the github provided discussion spaces, with the moderators being the part of ByteNess engineering team.
 
 To make a contribution:
 
@@ -62,6 +66,6 @@ To make a contribution:
   * Make your changes on the fork
   * Submit a pull request back to this repo with a clear description of the problem you're solving
   * Ensure your PR passes all current (and new) tests
-  * Ideally verify that [aws-vault](https://github.com/99designs/aws-vault) works with your changes (optional)
+  * Ideally verify that [aws-vault](https://github.com/bteness/aws-vault) works with your changes (optional)
 
 ...and we'll do our best to get your work merged in

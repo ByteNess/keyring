@@ -1,9 +1,9 @@
-module github.com/99designs/keyring
+module github.com/byteness/keyring
 
-go 1.19
+go 1.24
 
 require (
-	github.com/99designs/go-keychain v0.0.0-20191008050251-8e49817e8af4
+	github.com/byteness/go-keychain v0.0.0-20191008050251-8e49817e8af4
 	github.com/danieljoos/wincred v1.1.2
 	github.com/dvsekhvalnov/jose2go v1.5.0
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2
