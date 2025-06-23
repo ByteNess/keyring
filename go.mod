@@ -9,7 +9,7 @@ require (
 	github.com/dvsekhvalnov/jose2go v1.8.0
 	github.com/godbus/dbus v4.1.0+incompatible
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	golang.org/x/sys v0.33.0
 	golang.org/x/term v0.32.0
 )
