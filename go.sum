@@ -1,5 +1,5 @@
-github.com/byteness/go-keychain v0.0.0-20250621170550-72fd1d60b0b5 h1:UU441Hz7z+/2J1M3d03z8x8QSOX9eDb0dHL6dMsmaH4=
-github.com/byteness/go-keychain v0.0.0-20250621170550-72fd1d60b0b5/go.mod h1:9HlL8SWBRtCZE7sCNq+c3//H/oHywgSwtocmPTdOij8=
+github.com/byteness/go-keychain v0.0.0-20191008050251-8e49817e8af4 h1:HFl8GFmwK19hYuXB8OQ0rTO9WOCgZY9JUy964zaYawY=
+github.com/byteness/go-keychain v0.0.0-20191008050251-8e49817e8af4/go.mod h1:9HlL8SWBRtCZE7sCNq+c3//H/oHywgSwtocmPTdOij8=
 github.com/byteness/go-libsecret v0.0.0-20250705200722-75549abfe79c h1:acX3x2Ka/6jQt3inHLNUuL1IKxb/j4dNMbuL6B/N324=
 github.com/byteness/go-libsecret v0.0.0-20250705200722-75549abfe79c/go.mod h1:eVg/Qgq8PRiBljsgvBLlVpMSrLecEY8pINiVRKQYYdc=
 github.com/byteness/percent v0.2.2 h1:vnIFh8WBR1xoC+U2etz0EMB1cgp+vsK6vynqTCeDziU=

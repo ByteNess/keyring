@@ -3,7 +3,7 @@ module github.com/byteness/keyring
 go 1.24
 
 require (
-	github.com/byteness/go-keychain v0.0.0-20250621170550-72fd1d60b0b5
+	github.com/byteness/go-keychain v0.0.0-20191008050251-8e49817e8af4
 	github.com/byteness/go-libsecret v0.0.0-20250705200722-75549abfe79c
 	github.com/byteness/percent v0.2.2
 	github.com/danieljoos/wincred v1.2.2
