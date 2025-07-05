@@ -10,8 +10,8 @@ import (
 
 	"strings"
 
+	"github.com/byteness/go-libsecret"
 	"github.com/godbus/dbus/v5"
-	"github.com/gsterjov/go-libsecret"
 )
 
 func init() {
