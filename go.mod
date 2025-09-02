@@ -9,11 +9,11 @@ require (
 	github.com/danieljoos/wincred v1.2.2
 	github.com/dvsekhvalnov/jose2go v1.8.0
 	github.com/godbus/dbus/v5 v5.1.0
+	github.com/lox/go-touchid v0.0.0-20170712105233-619cc8e578d0
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/crypto v0.41.0
 	golang.org/x/sys v0.35.0
 	golang.org/x/term v0.34.0
-	github.com/lox/go-touchid v0.0.0-20170712105233-619cc8e578d0
-	golang.org/x/crypto v0.0.0-20220829220503-c86fa9a7ed90
 )
 
 require (
