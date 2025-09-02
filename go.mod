@@ -12,6 +12,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.35.0
 	golang.org/x/term v0.34.0
+	github.com/lox/go-touchid v0.0.0-20170712105233-619cc8e578d0
 )
 
 require (
