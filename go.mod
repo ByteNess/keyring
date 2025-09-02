@@ -13,6 +13,7 @@ require (
 	golang.org/x/sys v0.35.0
 	golang.org/x/term v0.34.0
 	github.com/lox/go-touchid v0.0.0-20170712105233-619cc8e578d0
+	golang.org/x/crypto v0.0.0-20220829220503-c86fa9a7ed90
 )
 
 require (
