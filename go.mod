@@ -1,6 +1,6 @@
 module github.com/byteness/keyring
 
-go 1.24
+go 1.24.0
 
 require (
 	github.com/byteness/go-keychain v0.0.0-20191008050251-8e49817e8af4
@@ -10,7 +10,7 @@ require (
 	github.com/dvsekhvalnov/jose2go v1.8.0
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/sys v0.35.0
+	golang.org/x/sys v0.36.0
 	golang.org/x/term v0.34.0
 )
 
