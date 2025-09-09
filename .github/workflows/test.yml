@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: 'stable'
-          go-version-file: 'go.mod'
+          #go-version-file: 'go.mod'
           check-latest: true
       - run: sudo apt-get update
       - run: sudo apt-get install pass gnome-keyring dbus-x11
