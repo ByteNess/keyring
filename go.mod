@@ -1,6 +1,8 @@
 module github.com/byteness/keyring
 
-go 1.24
+go 1.24.0
+
+toolchain go1.24.7
 
 require (
 	github.com/byteness/go-keychain v0.0.0-20191008050251-8e49817e8af4
