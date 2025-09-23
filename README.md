@@ -10,7 +10,7 @@ Keyring
 Keyring provides a common interface to a range of secure credential storage services. Originally developed as part of [AWS Vault](https://github.com/byteness/aws-vault), a command line tool for securely managing AWS access from developer workstations.
 
 Currently Keyring supports the following backends
- * [macOS Keychain](https://support.apple.com/en-au/guide/keychain-access/welcome/mac)
+ * [macOS Keychain](https://support.apple.com/en-au/guide/keychain-access/welcome/mac) (with TouchID support 🎉)
  * [Windows Credential Manager](https://support.microsoft.com/en-au/help/4026814/windows-accessing-credential-manager)
  * Secret Service ([Gnome Keyring](https://wiki.gnome.org/Projects/GnomeKeyring), [KWallet](https://kde.org/applications/system/org.kde.kwalletmanager5))
  * [KWallet](https://kde.org/applications/system/org.kde.kwalletmanager5)
@@ -36,6 +36,14 @@ _ = ring.Set(keyring.Item{
 i, _ := ring.Get("foo")
 
 fmt.Printf("%s", i.Data)
+```
+
+To configure TouchId biometrics:
+
+```go
+keyring.Config.UseBiometrics = true
+keyring.Config.TouchIDAccount = "cc.byteness.aws-vault.biometrics"
+keyring.Config.TouchIDService = "aws-vault"
 ```
 
 For more detail on the API please check [the keyring godocs](https://godoc.org/github.com/byteness/keyring)
@@ -68,4 +76,4 @@ To make a contribution:
   * Ensure your PR passes all current (and new) tests
   * Ideally verify that [aws-vault](https://github.com/bteness/aws-vault) works with your changes (optional)
 
-...and we'll do our best to get your work merged in
+...and we'll do our best to get your work merged in!
