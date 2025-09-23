@@ -1,6 +1,8 @@
 module github.com/byteness/keyring
 
-go 1.24
+go 1.24.0
+
+toolchain go1.24.7
 
 require (
 	github.com/byteness/go-keychain v0.0.0-20191008050251-8e49817e8af4
@@ -12,8 +14,8 @@ require (
 	github.com/lox/go-touchid v0.0.0-20170712105233-619cc8e578d0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.41.0
-	golang.org/x/sys v0.35.0
-	golang.org/x/term v0.34.0
+	golang.org/x/sys v0.36.0
+	golang.org/x/term v0.35.0
 )
 
 require (
