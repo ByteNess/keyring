@@ -1,5 +1,9 @@
 package keyring
 
+import (
+	"time"
+)
+
 // Config contains configuration for keyring.
 type Config struct {
 	// AllowedBackends is a whitelist of backend providers that can be used. Nil means all available.
@@ -64,4 +68,19 @@ type Config struct {
 
 	// TouchIDService is the name of the service that we store the unlock password in keychain
 	TouchIDService string
+
+	// OPTimeout is the timeout for 1Password API operations (1Password Service Accounts only)
+	OPTimeout time.Duration
+
+	// OPVaultID is the UUID of the 1Password vault
+	OPVaultID string
+
+	// OPItemTitlePrefix is the prefix to prepend to 1Password item titles
+	OPItemTitlePrefix string
+
+	// OPItemTag is the tag to apply to 1Password items
+	OPItemTag string
+
+	// OPItemFieldTitle is the title of the 1Password item field
+	OPItemFieldTitle string
 }
