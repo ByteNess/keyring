@@ -20,64 +20,24 @@ const (
 )
 
 var (
-	OPStandardErrKeyring = errors.New(
-		"Unable to create a 1Password Service Accounts keyring",
-	)
-	OPStandardErrKeyringEnvTokenUnsetOrEmpty = fmt.Errorf(
-		"%w: %w: %#v",
-		OPStandardErrKeyring,
-		ErrEnvUnsetOrEmpty,
-		OPStandardEnvToken,
-	)
-	OPStandardErrKeyringNewClientErr = fmt.Errorf(
+	OPStandardErrClient    = errors.New("Unable to create a 1Password Service Accounts client")
+	OPStandardErrKeyring   = errors.New("Unable to create a 1Password Service Accounts keyring")
+	OPStandardErrNewClient = fmt.Errorf(
 		"%w: onepassword.NewClient returned an error",
+		OPStandardErrClient,
+	)
+	OPStandardErrTimeout = fmt.Errorf(
+		"%w: Timeout must be a non-zero duration",
 		OPStandardErrKeyring,
 	)
 )
 
 func init() {
 	supportedBackends[OPBackend] = opener(func(cfg Config) (Keyring, error) {
-		var err error
-
-		timeout := cfg.OPTimeout
-		if timeout == 0 {
-			return nil, errors.New("1Password timeout must be a non-zero duration")
-		}
-
-		vaultID := cfg.OPVaultID
-		if vaultID == "" {
-			vaultID = os.Getenv(OPEnvVaultID)
-			if vaultID == "" {
-				return nil, OPErrKeyringEnvVaultIDUnsetOrEmpty
-			}
-		}
-
-		itemTitlePrefix := cfg.OPItemTitlePrefix
-		if itemTitlePrefix == "" {
-			itemTitlePrefix = OPItemTitlePrefix
-		}
-
-		itemTag := cfg.OPItemTag
-		if itemTag == "" {
-			itemTag = OPItemTag
-		}
-
-		itemFieldTitle := cfg.OPItemFieldTitle
-		if itemFieldTitle == "" {
-			itemFieldTitle = OPItemFieldTitle
-		}
-
-		keyring, err := NewOPStandardKeyring(
-			timeout,
-			vaultID,
-			itemTitlePrefix,
-			itemTag,
-			itemFieldTitle,
-		)
+		keyring, err := NewOPStandardKeyring(&cfg)
 		if err != nil {
 			return nil, err
 		}
-
 		return *keyring, nil
 	})
 }
@@ -88,26 +48,67 @@ type OPStandardKeyring struct {
 	Client  OPStandardClientAPI
 }
 
-func NewOPStandardKeyring(
-	timeout time.Duration,
-	vaultID string,
-	itemTitlePrefix string,
-	itemTag string,
-	itemFieldTitle string,
-) (*OPStandardKeyring, error) {
+func NewOPStandardKeyring(cfg *Config) (*OPStandardKeyring, error) {
+	errs := []error{}
+
+	timeout := cfg.OPTimeout
+	if timeout == 0 {
+		errs = append(errs, OPStandardErrTimeout)
+	}
+
+	vaultID := cfg.OPVaultID
+	if vaultID == "" {
+		vaultID = os.Getenv(OPEnvVaultID)
+		if vaultID == "" {
+			errs = append(errs, OPErrVaultID)
+		}
+	}
+
+	itemTitlePrefix := cfg.OPItemTitlePrefix
+	if itemTitlePrefix == "" {
+		itemTitlePrefix = OPItemTitlePrefix
+	}
+
+	itemTag := cfg.OPItemTag
+	if itemTag == "" {
+		itemTag = OPItemTag
+	}
+
+	itemFieldTitle := cfg.OPItemFieldTitle
+	if itemFieldTitle == "" {
+		itemFieldTitle = OPItemFieldTitle
+	}
+
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+
 	keyring := &OPStandardKeyring{
 		OPBaseKeyring: OPBaseKeyring{
 			VaultID:         vaultID,
 			ItemTitlePrefix: itemTitlePrefix,
 			ItemTag:         itemTag,
 			ItemFieldTitle:  itemFieldTitle,
+			TokenFunc:       cfg.OPTokenFunc,
 		},
 		Timeout: timeout,
 	}
 
+	return keyring, nil
+}
+
+func (k *OPStandardKeyring) InitializeOPStandardClient() error {
+	if k.Client != nil {
+		return nil
+	}
+
 	token := os.Getenv(OPStandardEnvToken)
+	var err error
 	if token == "" {
-		return nil, OPStandardErrKeyringEnvTokenUnsetOrEmpty
+		token, err = k.GetOPToken("Enter 1Password service account token")
+		if err != nil {
+			return err
+		}
 	}
 
 	client, err := onepassword.NewClient(
@@ -116,12 +117,12 @@ func NewOPStandardKeyring(
 		onepassword.WithServiceAccountToken(token),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", OPStandardErrKeyringNewClientErr, err)
+		return fmt.Errorf("%w: %w", OPStandardErrNewClient, err)
 	}
 
-	keyring.Client = client.Items()
+	k.Client = client.Items()
 
-	return keyring, nil
+	return nil
 }
 
 func (k *OPStandardKeyring) GetOPItem(key string) (*onepassword.Item, error) {
@@ -209,6 +210,10 @@ func (k *OPStandardKeyring) GetOPItems() ([]onepassword.Item, error) {
 }
 
 func (k OPStandardKeyring) Get(key string) (Item, error) {
+	if err := k.InitializeOPStandardClient(); err != nil {
+		return Item{}, err
+	}
+
 	opItem, err := k.GetOPItem(key)
 	if err != nil {
 		return Item{}, err
@@ -221,14 +226,14 @@ func (k OPStandardKeyring) Get(key string) (Item, error) {
 }
 
 func (k OPStandardKeyring) GetMetadata(key string) (Metadata, error) {
-	opItem, err := k.GetOPItem(key)
-	if err != nil {
-		return Metadata{}, nil
-	}
-	return Metadata{ModificationTime: opItem.UpdatedAt}, nil
+	return Metadata{}, nil
 }
 
 func (k OPStandardKeyring) Set(item Item) error {
+	if err := k.InitializeOPStandardClient(); err != nil {
+		return err
+	}
+
 	opItem, err := k.GetOPItem(item.Key)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return err
@@ -287,6 +292,10 @@ func (k OPStandardKeyring) Set(item Item) error {
 }
 
 func (k OPStandardKeyring) Remove(key string) error {
+	if err := k.InitializeOPStandardClient(); err != nil {
+		return err
+	}
+
 	opItem, err := k.GetOPItem(key)
 	if err != nil {
 		return err
@@ -307,6 +316,10 @@ func (k OPStandardKeyring) Remove(key string) error {
 }
 
 func (k OPStandardKeyring) Keys() ([]string, error) {
+	if err := k.InitializeOPStandardClient(); err != nil {
+		return nil, err
+	}
+
 	opItems, err := k.GetOPItems()
 	if err != nil {
 		return nil, err

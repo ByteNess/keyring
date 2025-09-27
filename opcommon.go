@@ -18,18 +18,17 @@ const (
 )
 
 var (
-	ErrEnvUnsetOrEmpty      = errors.New("Environment variable unset or empty")
+	ErrEnvUnsetOrEmpty = errors.New("Environment variable unset or empty")
+	OPErrClient        = errors.New(
+		"Unable to create a 1Password Connect / Service Accounts client",
+	)
 	OPErrItemMultiple       = errors.New("Found multiple matching 1Password items")
 	OPErrItemTitleDuplicate = errors.New("Found duplicate 1Password item title")
 	OPErrKeyring            = errors.New(
 		"Unable to create a 1Password Connect / Service Accounts keyring",
 	)
-	OPErrKeyringEnvVaultIDUnsetOrEmpty = fmt.Errorf(
-		"%w: %w: %#v",
-		OPErrKeyring,
-		ErrEnvUnsetOrEmpty,
-		OPEnvVaultID,
-	)
+	OPErrTokenFuncNil = fmt.Errorf("%w: Token function is nil", OPErrClient)
+	OPErrVaultID      = fmt.Errorf("%w: %w: %#v", OPErrKeyring, ErrEnvUnsetOrEmpty, OPEnvVaultID)
 )
 
 type OPKeyringAPI interface {
@@ -40,6 +39,7 @@ type OPKeyringAPI interface {
 	GetOPItemFieldValueFromItem(item *Item) (string, error)
 	GetOPItems() ([]onepassword.Item, error)
 	GetOPItemTitleFromKey(key string) string
+	GetOPToken(prompt string) (string, error)
 }
 
 type OPBaseKeyring struct {
@@ -47,6 +47,7 @@ type OPBaseKeyring struct {
 	ItemTitlePrefix string
 	ItemTag         string
 	ItemFieldTitle  string
+	TokenFunc       PromptFunc
 }
 
 func (k *OPBaseKeyring) GetItemFromOPItemFieldValue(opItemFieldValue string) (*Item, error) {
@@ -69,4 +70,11 @@ func (k *OPBaseKeyring) GetOPItemFieldValueFromItem(item *Item) (string, error) 
 
 func (k *OPBaseKeyring) GetOPItemTitleFromKey(key string) string {
 	return k.ItemTitlePrefix + OPItemTitlePrefixKeySep + key
+}
+
+func (k *OPBaseKeyring) GetOPToken(prompt string) (string, error) {
+	if k.TokenFunc != nil {
+		return k.TokenFunc(prompt)
+	}
+	return "", OPErrTokenFuncNil
 }

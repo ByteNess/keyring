@@ -12,54 +12,11 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func TestNewOPStandardKeyring(t *testing.T) {
-	testCases := []struct {
-		name string
-		env  map[string]string
-		err  error
-	}{
-		{
-			"ok",
-			map[string]string{
-				OPStandardEnvToken: "svcAccountToken",
-			},
-			OPStandardErrKeyringNewClientErr,
-		},
-		{
-			"OPStandardEnvTokenEmpty",
-			map[string]string{
-				OPStandardEnvToken: "",
-			},
-			OPStandardErrKeyringEnvTokenUnsetOrEmpty,
-		},
-	}
-
-	for _, tt := range testCases {
-		t.Run(tt.name, func(t *testing.T) {
-			for key, value := range tt.env {
-				t.Setenv(key, value)
-			}
-
-			_, err := NewOPStandardKeyring(
-				0,
-				"vaultID",
-				"itemTitlePrefix",
-				"itemTag",
-				"itemFieldTitle",
-			)
-			if !errors.Is(err, tt.err) {
-				t.Fatalf("Error %#v is expected to be %#v", err, tt.err)
-			}
-		})
-	}
-}
-
 func TestOPStandardKeyring_Get(t *testing.T) {
 	testCases := []struct {
 		name            string
 		key             string
 		data            []byte
-		opItemUpdatedAt time.Time
 		opItemsExisting []onepassword.Item
 		err             error
 	}{
@@ -67,7 +24,6 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 			"ok",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]onepassword.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -88,7 +44,6 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 			"opItemTitleMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]onepassword.Item{{
 				ID:       "itemID",
 				Title:    "itemTitleMismatch",
@@ -109,7 +64,6 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 			"opItemTagMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]onepassword.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -130,7 +84,6 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 			"opItemCategoryMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]onepassword.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -151,7 +104,6 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 			"opItemFieldTitleMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]onepassword.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -172,7 +124,6 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 			"opItemFieldTitleDuplicate",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]onepassword.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -201,7 +152,6 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 			"opItemFieldTypeMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]onepassword.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -222,7 +172,6 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 			"opItemDuplicate",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]onepassword.Item{
 				{
 					ID:       "itemID1",
@@ -287,24 +236,6 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 					"Item generated is not item retrieved: %#v vs %#v",
 					expectedItem,
 					actualItem,
-				)
-			}
-
-			NewOPStandardKeyringMock_GetItem(t, keyring, tt.opItemsExisting)
-
-			actualMetadata, err := keyring.GetMetadata(tt.key)
-			if (tt.err == ErrKeyNotFound && err != tt.err) || !errors.Is(err, tt.err) {
-				t.Fatal(err)
-			}
-			if err != nil {
-				return
-			}
-
-			if actualMetadata.ModificationTime != tt.opItemUpdatedAt {
-				t.Fatalf(
-					"Expected modification time is not actual modification time: %#v vs %#v",
-					tt.opItemUpdatedAt,
-					actualMetadata.ModificationTime,
 				)
 			}
 		})

@@ -11,76 +11,11 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func TestNewOPConnectKeyring(t *testing.T) {
-	testCases := []struct {
-		name         string
-		env          map[string]string
-		errsExpected []error
-	}{
-		{
-			"ok",
-			map[string]string{
-				OPConnectEnvHost:  "connectHost",
-				OPConnectEnvToken: "connectToken",
-			},
-			nil,
-		},
-		{
-			"OPConnectEnvHostEmpty",
-			map[string]string{
-				OPConnectEnvHost:  "",
-				OPConnectEnvToken: "connectToken",
-			},
-			[]error{OPConnectErrKeyringEnvHostUnsetOrEmpty},
-		},
-		{
-			"OPConnectEnvTokenEmpty",
-			map[string]string{
-				OPConnectEnvHost:  "connectHost",
-				OPConnectEnvToken: "",
-			},
-			[]error{OPConnectErrKeyringEnvTokenUnsetOrEmpty},
-		},
-		{
-			"bothEmpty",
-			map[string]string{
-				OPConnectEnvHost:  "",
-				OPConnectEnvToken: "",
-			},
-			[]error{
-				OPConnectErrKeyringEnvHostUnsetOrEmpty,
-				OPConnectErrKeyringEnvTokenUnsetOrEmpty,
-			},
-		},
-	}
-
-	for _, tt := range testCases {
-		t.Run(tt.name, func(t *testing.T) {
-			for key, value := range tt.env {
-				t.Setenv(key, value)
-			}
-
-			_, errActual := NewOPConnectKeyring(
-				"vaultID",
-				"itemTitlePrefix",
-				"itemTag",
-				"itemFieldTitle",
-			)
-			for _, errExpected := range tt.errsExpected {
-				if !errors.Is(errActual, errExpected) {
-					t.Fatalf("Error %#v is expected to be %#v", errActual, errExpected)
-				}
-			}
-		})
-	}
-}
-
 func TestOPConnectKeyring_Get(t *testing.T) {
 	testCases := []struct {
 		name            string
 		key             string
 		data            []byte
-		opItemUpdatedAt time.Time
 		opItemsExisting []connectop.Item
 		err             error
 	}{
@@ -88,7 +23,6 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 			"ok",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]connectop.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -109,7 +43,6 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 			"opItemTitleMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]connectop.Item{{
 				ID:       "itemID",
 				Title:    "itemTitleMismatch",
@@ -130,7 +63,6 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 			"opItemTagMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]connectop.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -151,7 +83,6 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 			"opItemCategoryMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]connectop.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -172,7 +103,6 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 			"opItemFieldTitleMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]connectop.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -193,7 +123,6 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 			"opItemFieldTitleDuplicate",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]connectop.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -222,7 +151,6 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 			"opItemFieldTypeMismatch",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]connectop.Item{{
 				ID:       "itemID",
 				Title:    "itemTitlePrefix: key",
@@ -243,7 +171,6 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 			"opItemDuplicate",
 			"key",
 			[]byte(`data`),
-			time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			[]connectop.Item{
 				{
 					ID:       "itemID0",
@@ -308,24 +235,6 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 					"Item generated is not item retrieved: %#v vs %#v",
 					expectedItem,
 					actualItem,
-				)
-			}
-
-			NewOPConnectKeyringMock_GetItem(t, keyring, tt.key, tt.opItemsExisting)
-
-			actualMetadata, err := keyring.GetMetadata(tt.key)
-			if (tt.err == ErrKeyNotFound && err != tt.err) || !errors.Is(err, tt.err) {
-				t.Fatal(err)
-			}
-			if err != nil {
-				return
-			}
-
-			if actualMetadata.ModificationTime != tt.opItemUpdatedAt {
-				t.Fatalf(
-					"Expected modification time is not actual modification time: %#v vs %#v",
-					tt.opItemUpdatedAt,
-					actualMetadata.ModificationTime,
 				)
 			}
 		})

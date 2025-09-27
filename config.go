@@ -83,4 +83,13 @@ type Config struct {
 
 	// OPItemFieldTitle is the title of the 1Password item field
 	OPItemFieldTitle string
+
+	// OPConnectHost is the 1Password Connect server HTTP(S) URI
+	OPConnectHost string
+
+	// OPConnectTokenFunc is a function used to prompt the user for the 1Password Connect token
+	OPConnectTokenFunc PromptFunc
+
+	// OPTokenFunc is a function used to prompt the user for the 1Password service account token
+	OPTokenFunc PromptFunc
 }

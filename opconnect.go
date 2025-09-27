@@ -20,96 +20,100 @@ const (
 )
 
 var (
-	OPConnectErrKeyring = errors.New(
-		"Unable to create a 1Password Connect keyring",
-	)
-	OPConnectErrKeyringEnvHostUnsetOrEmpty = fmt.Errorf(
+	OPConnectErrHost = fmt.Errorf(
 		"%w: %w: %#v",
 		OPConnectErrKeyring,
 		ErrEnvUnsetOrEmpty,
 		OPConnectEnvHost,
 	)
-	OPConnectErrKeyringEnvTokenUnsetOrEmpty = fmt.Errorf(
-		"%w: %w: %#v",
-		OPConnectErrKeyring,
-		ErrEnvUnsetOrEmpty,
-		OPConnectEnvToken,
-	)
+	OPConnectErrKeyring = errors.New("Unable to create a 1Password Connect keyring")
 )
 
 func init() {
 	supportedBackends[OPConnectBackend] = opener(func(cfg Config) (Keyring, error) {
-		vaultID := cfg.OPVaultID
-		if vaultID == "" {
-			vaultID = os.Getenv(OPEnvVaultID)
-			if vaultID == "" {
-				return nil, OPErrKeyringEnvVaultIDUnsetOrEmpty
-			}
-		}
-
-		itemTitlePrefix := cfg.OPItemTitlePrefix
-		if itemTitlePrefix == "" {
-			itemTitlePrefix = OPItemTitlePrefix
-		}
-
-		itemTag := cfg.OPItemTag
-		if itemTag == "" {
-			itemTag = OPItemTag
-		}
-
-		itemFieldTitle := cfg.OPItemFieldTitle
-		if itemFieldTitle == "" {
-			itemFieldTitle = OPItemFieldTitle
-		}
-
-		keyring, err := NewOPConnectKeyring(vaultID, itemTitlePrefix, itemTag, itemFieldTitle)
+		keyring, err := NewOPConnectKeyring(&cfg)
 		if err != nil {
 			return nil, err
 		}
-
 		return *keyring, nil
 	})
 }
 
 type OPConnectKeyring struct {
 	OPBaseKeyring
+	Host   string
 	Client OPConnectClientAPI
 }
 
-func NewOPConnectKeyring(
-	vaultID string,
-	itemTitlePrefix string,
-	itemTag string,
-	itemFieldTitle string,
-) (*OPConnectKeyring, error) {
-	keyring := &OPConnectKeyring{
-		OPBaseKeyring: OPBaseKeyring{
-			VaultID:         vaultID,
-			ItemTitlePrefix: itemTitlePrefix,
-			ItemTag:         itemTag,
-			ItemFieldTitle:  itemFieldTitle,
-		},
-	}
-
+func NewOPConnectKeyring(cfg *Config) (*OPConnectKeyring, error) {
 	errs := []error{}
 
-	host := os.Getenv(OPConnectEnvHost)
-	if host == "" {
-		errs = append(errs, OPConnectErrKeyringEnvHostUnsetOrEmpty)
+	vaultID := cfg.OPVaultID
+	if vaultID == "" {
+		vaultID = os.Getenv(OPEnvVaultID)
+		if vaultID == "" {
+			errs = append(errs, OPErrVaultID)
+		}
 	}
 
-	token := os.Getenv(OPConnectEnvToken)
-	if token == "" {
-		errs = append(errs, OPConnectErrKeyringEnvTokenUnsetOrEmpty)
+	itemTitlePrefix := cfg.OPItemTitlePrefix
+	if itemTitlePrefix == "" {
+		itemTitlePrefix = OPItemTitlePrefix
+	}
+
+	itemTag := cfg.OPItemTag
+	if itemTag == "" {
+		itemTag = OPItemTag
+	}
+
+	itemFieldTitle := cfg.OPItemFieldTitle
+	if itemFieldTitle == "" {
+		itemFieldTitle = OPItemFieldTitle
+	}
+
+	host := cfg.OPConnectHost
+	if host == "" {
+		host = os.Getenv(OPConnectEnvHost)
+		if host == "" {
+			errs = append(errs, OPConnectErrHost)
+		}
 	}
 
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
 	}
 
-	keyring.Client = connect.NewClient(host, token)
+	keyring := &OPConnectKeyring{
+		OPBaseKeyring: OPBaseKeyring{
+			VaultID:         vaultID,
+			ItemTitlePrefix: itemTitlePrefix,
+			ItemTag:         itemTag,
+			ItemFieldTitle:  itemFieldTitle,
+			TokenFunc:       cfg.OPConnectTokenFunc,
+		},
+		Host: host,
+	}
 
 	return keyring, nil
+}
+
+func (k *OPConnectKeyring) InitializeOPConnectClient() error {
+	if k.Client != nil {
+		return nil
+	}
+
+	token := os.Getenv(OPConnectEnvToken)
+	var err error
+	if token == "" {
+		token, err = k.GetOPToken("Enter 1Password Connect token")
+		if err != nil {
+			return err
+		}
+	}
+
+	k.Client = connect.NewClient(k.Host, token)
+
+	return nil
 }
 
 func (k *OPConnectKeyring) GetOPItem(key string) (*onepassword.Item, error) {
@@ -197,6 +201,10 @@ func (k *OPConnectKeyring) PruneAndHydrateOPItemOverviews(
 }
 
 func (k OPConnectKeyring) Get(key string) (Item, error) {
+	if err := k.InitializeOPConnectClient(); err != nil {
+		return Item{}, err
+	}
+
 	opItem, err := k.GetOPItem(key)
 	if err != nil {
 		return Item{}, err
@@ -209,14 +217,14 @@ func (k OPConnectKeyring) Get(key string) (Item, error) {
 }
 
 func (k OPConnectKeyring) GetMetadata(key string) (Metadata, error) {
-	opItem, err := k.GetOPItem(key)
-	if err != nil {
-		return Metadata{}, err
-	}
-	return Metadata{ModificationTime: opItem.UpdatedAt}, nil
+	return Metadata{}, nil
 }
 
 func (k OPConnectKeyring) Set(item Item) error {
+	if err := k.InitializeOPConnectClient(); err != nil {
+		return err
+	}
+
 	opItem, err := k.GetOPItem(item.Key)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return err
@@ -270,6 +278,10 @@ func (k OPConnectKeyring) Set(item Item) error {
 }
 
 func (k OPConnectKeyring) Remove(key string) error {
+	if err := k.InitializeOPConnectClient(); err != nil {
+		return err
+	}
+
 	opItem, err := k.GetOPItem(key)
 	if err != nil {
 		return err
@@ -305,6 +317,10 @@ func (k *OPConnectKeyring) GetOPItems() ([]onepassword.Item, error) {
 }
 
 func (k OPConnectKeyring) Keys() ([]string, error) {
+	if err := k.InitializeOPConnectClient(); err != nil {
+		return nil, err
+	}
+
 	opItems, err := k.GetOPItems()
 	if err != nil {
 		return nil, err
