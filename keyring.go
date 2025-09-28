@@ -20,10 +20,15 @@ const (
 	WinCredBackend       BackendType = "wincred"
 	FileBackend          BackendType = "file"
 	PassBackend          BackendType = "pass"
+	OPBackend            BackendType = "op"
+	OPConnectBackend     BackendType = "op-connect"
 )
 
 // This order makes sure the OS-specific backends
 // are picked over the more generic backends.
+//
+// The 1Password backends have lower priority than FileBackend to effectively ensure that they
+// are not automatically enabled.
 var backendOrder = []BackendType{
 	// Windows
 	WinCredBackend,
@@ -36,6 +41,9 @@ var backendOrder = []BackendType{
 	// General
 	PassBackend,
 	FileBackend,
+	// 1Password
+	OPConnectBackend,
+	OPBackend,
 }
 
 var supportedBackends = map[BackendType]opener{}
