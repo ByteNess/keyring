@@ -87,8 +87,14 @@ type Config struct {
 	// OPConnectHost is the 1Password Connect server HTTP(S) URI
 	OPConnectHost string
 
+	// OPConnectTokenEnv is the primary environment variable from which to look up the 1Password Connect token
+	OPConnectTokenEnv string
+
 	// OPConnectTokenFunc is a function used to prompt the user for the 1Password Connect token
 	OPConnectTokenFunc PromptFunc
+
+	// OPTokenEnv is the primary environment variable from which to look up the 1Password service account token
+	OPTokenEnv string
 
 	// OPTokenFunc is a function used to prompt the user for the 1Password service account token
 	OPTokenFunc PromptFunc

@@ -89,6 +89,7 @@ func NewOPConnectKeyring(cfg *Config) (*OPConnectKeyring, error) {
 			ItemTitlePrefix: itemTitlePrefix,
 			ItemTag:         itemTag,
 			ItemFieldTitle:  itemFieldTitle,
+			TokenEnvs:       []string{cfg.OPConnectTokenEnv, OPConnectEnvToken},
 			TokenFunc:       cfg.OPConnectTokenFunc,
 		},
 		Host: host,
@@ -102,13 +103,9 @@ func (k *OPConnectKeyring) InitializeOPConnectClient() error {
 		return nil
 	}
 
-	token := os.Getenv(OPConnectEnvToken)
-	var err error
-	if token == "" {
-		token, err = k.GetOPToken("Enter 1Password Connect token")
-		if err != nil {
-			return err
-		}
+	token, err := k.GetOPToken("Enter 1Password Connect token")
+	if err != nil {
+		return err
 	}
 
 	k.Client = connect.NewClient(k.Host, token)

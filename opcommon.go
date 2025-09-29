@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	onepassword "github.com/1password/onepassword-sdk-go"
@@ -47,6 +48,7 @@ type OPBaseKeyring struct {
 	ItemTitlePrefix string
 	ItemTag         string
 	ItemFieldTitle  string
+	TokenEnvs       []string
 	TokenFunc       PromptFunc
 }
 
@@ -73,6 +75,12 @@ func (k *OPBaseKeyring) GetOPItemTitleFromKey(key string) string {
 }
 
 func (k *OPBaseKeyring) GetOPToken(prompt string) (string, error) {
+	for _, tokenEnv := range k.TokenEnvs {
+		token := os.Getenv(tokenEnv)
+		if token != "" {
+			return token, nil
+		}
+	}
 	if k.TokenFunc != nil {
 		return k.TokenFunc(prompt)
 	}
