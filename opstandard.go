@@ -89,6 +89,7 @@ func NewOPStandardKeyring(cfg *Config) (*OPStandardKeyring, error) {
 			ItemTitlePrefix: itemTitlePrefix,
 			ItemTag:         itemTag,
 			ItemFieldTitle:  itemFieldTitle,
+			TokenEnvs:       []string{cfg.OPTokenEnv, OPStandardEnvToken},
 			TokenFunc:       cfg.OPTokenFunc,
 		},
 		Timeout: timeout,
@@ -102,13 +103,9 @@ func (k *OPStandardKeyring) InitializeOPStandardClient() error {
 		return nil
 	}
 
-	token := os.Getenv(OPStandardEnvToken)
-	var err error
-	if token == "" {
-		token, err = k.GetOPToken("Enter 1Password service account token")
-		if err != nil {
-			return err
-		}
+	token, err := k.GetOPToken("Enter 1Password service account token")
+	if err != nil {
+		return err
 	}
 
 	client, err := onepassword.NewClient(
