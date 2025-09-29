@@ -27,8 +27,9 @@ const (
 // This order makes sure the OS-specific backends
 // are picked over the more generic backends.
 //
-// The 1Password backends have lower priority than FileBackend to effectively ensure that they
-// are not automatically enabled.
+// The 1Password backends have lower priority than FileBackend to ensure that they are not
+// automatically picked. FileBackend is picked if no backend preceding it is picked, so any backend
+// following FileBackend may never automatically be picked.
 var backendOrder = []BackendType{
 	// Windows
 	WinCredBackend,
