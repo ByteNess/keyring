@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	OPEnvVaultID            = "OP_VAULT"
+	OPEnvVaultID            = "OP_VAULT_ID"
 	OPItemFieldTitle        = "keyring"
 	OPItemTag               = "keyring"
 	OPItemTitlePrefix       = "keyring"
