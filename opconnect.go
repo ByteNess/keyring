@@ -90,7 +90,7 @@ func NewOPConnectKeyring(cfg *Config) (*OPConnectKeyring, error) {
 			ItemTag:         itemTag,
 			ItemFieldTitle:  itemFieldTitle,
 			TokenEnvs:       []string{cfg.OPConnectTokenEnv, OPConnectEnvToken},
-			TokenFunc:       cfg.OPConnectTokenFunc,
+			TokenFunc:       cfg.OPTokenFunc,
 		},
 		Host: host,
 	}
