@@ -10,7 +10,7 @@ require (
 	github.com/byteness/go-keychain v0.0.0-20191008050251-8e49817e8af4
 	github.com/byteness/go-libsecret v0.0.0-20250705200722-75549abfe79c
 	github.com/byteness/percent v0.2.2
-	github.com/danieljoos/wincred v1.2.2
+	github.com/danieljoos/wincred v1.2.3
 	github.com/dvsekhvalnov/jose2go v1.8.0
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/lox/go-touchid v0.0.0-20170712105233-619cc8e578d0
