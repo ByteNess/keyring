@@ -1,8 +1,6 @@
 module github.com/byteness/keyring
 
-go 1.24.0
-
-toolchain go1.24.7
+go 1.25
 
 require (
 	github.com/1Password/connect-sdk-go v1.5.4-0.20250417152128-c154b387248b
