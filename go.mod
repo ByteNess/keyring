@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/1Password/connect-sdk-go v1.5.4-0.20250417152128-c154b387248b
-	github.com/1password/onepassword-sdk-go v0.3.2-0.20250818130116-54fb7ee8021b
+	github.com/1password/onepassword-sdk-go v0.4.0-beta.1
 	github.com/byteness/go-keychain v0.0.0-20191008050251-8e49817e8af4
 	github.com/byteness/go-libsecret v0.0.0-20250705200722-75549abfe79c
 	github.com/byteness/percent v0.2.2
