@@ -10,7 +10,7 @@ require (
 	github.com/byteness/percent v0.2.2
 	github.com/danieljoos/wincred v1.2.3
 	github.com/dvsekhvalnov/jose2go v1.8.0
-	github.com/godbus/dbus/v5 v5.1.0
+	github.com/godbus/dbus/v5 v5.2.0
 	github.com/lox/go-touchid v0.0.0-20170712105233-619cc8e578d0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.44.0
