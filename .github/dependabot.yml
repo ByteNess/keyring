@@ -6,10 +6,12 @@
 version: 2
 updates:
   - package-ecosystem: "gomod" # See documentation for possible values
+    open-pull-requests-limit: 10
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
   - package-ecosystem: "github-actions"
+    open-pull-requests-limit: 10
     directory: "/"
     schedule:
       # Check for updates to GitHub Actions every week
