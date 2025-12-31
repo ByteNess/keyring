@@ -22,6 +22,7 @@ const (
 	PassBackend          BackendType = "pass"
 	OPBackend            BackendType = "op"
 	OPConnectBackend     BackendType = "op-connect"
+	OPDesktopBackend     BackendType = "op-desktop"
 )
 
 // This order makes sure the OS-specific backends
@@ -45,6 +46,7 @@ var backendOrder = []BackendType{
 	// 1Password
 	OPConnectBackend,
 	OPBackend,
+	OPDesktopBackend,
 }
 
 var supportedBackends = map[BackendType]opener{}
