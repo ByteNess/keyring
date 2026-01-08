@@ -17,40 +17,40 @@ func TestNewOPDesktopKeyring(t *testing.T) {
 		{
 			name: "valid configuration",
 			cfg: Config{
-				OPTimeout:            5 * time.Second,
-				OPVaultID:            "vaultID",
-				OPDesktopAccountName: "accountName",
+				OPTimeout:          5 * time.Second,
+				OPVaultID:          "vaultID",
+				OPDesktopAccountID: "accountID",
 			},
 			expectError: nil,
 		},
 		{
 			name: "missing timeout",
 			cfg: Config{
-				OPVaultID:            "vaultID",
-				OPDesktopAccountName: "accountName",
+				OPVaultID:          "vaultID",
+				OPDesktopAccountID: "accountID",
 			},
 			expectError: OPDesktopErrTimeout,
 		},
 		{
 			name: "missing vault ID",
 			cfg: Config{
-				OPTimeout:            5 * time.Second,
-				OPDesktopAccountName: "accountName",
+				OPTimeout:          5 * time.Second,
+				OPDesktopAccountID: "accountID",
 			},
 			expectError: OPErrVaultID,
 		},
 		{
-			name: "missing desktop account name",
+			name: "missing desktop account id",
 			cfg: Config{
 				OPTimeout: 5 * time.Second,
 				OPVaultID: "vaultID",
 			},
-			expectError: OPDesktopErrAccountName,
+			expectError: OPDesktopErrAccountID,
 		},
 		{
 			name:        "missing all",
 			cfg:         Config{},
-			expectError: errors.Join(OPDesktopErrTimeout, OPErrVaultID, OPDesktopErrAccountName),
+			expectError: errors.Join(OPDesktopErrTimeout, OPErrVaultID, OPDesktopErrAccountID),
 		},
 	}
 
@@ -65,7 +65,7 @@ func TestNewOPDesktopKeyring(t *testing.T) {
 				assert.NotNil(t, keyring)
 				assert.Equal(t, tc.cfg.OPTimeout, keyring.Timeout)
 				assert.Equal(t, tc.cfg.OPVaultID, keyring.VaultID)
-				assert.Equal(t, tc.cfg.OPDesktopAccountName, keyring.DesktopAccountName)
+				assert.Equal(t, tc.cfg.OPDesktopAccountID, keyring.DesktopAccountID)
 			}
 		})
 	}

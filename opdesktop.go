@@ -10,15 +10,15 @@ import (
 )
 
 const (
-	OPDesktopEnvAccountName = "OP_DESKTOP_ACCOUNT_NAME"
+	OPDesktopEnvAccountID = "OP_DESKTOP_ACCOUNT_ID"
 )
 
 var (
-	OPDesktopErrAccountName = fmt.Errorf(
+	OPDesktopErrAccountID = fmt.Errorf(
 		"%w: %w: %#v",
 		OPDesktopErrKeyring,
 		ErrEnvUnsetOrEmpty,
-		OPDesktopEnvAccountName,
+		OPDesktopEnvAccountID,
 	)
 
 	OPDesktopErrClient    = errors.New("Unable to create a 1Password Desktop client")
@@ -46,7 +46,7 @@ func init() {
 // OPDesktopKeyring implements Keyring interface for 1Password Desktop Integration
 type OPDesktopKeyring struct {
 	OPStandardKeyring
-	DesktopAccountName string
+	DesktopAccountID string
 	// fullClient stores the complete client to prevent premature garbage collection
 	// which would trigger the finalizer and release the client ID
 	fullClient *onepassword.Client
@@ -68,11 +68,11 @@ func NewOPDesktopKeyring(cfg *Config) (*OPDesktopKeyring, error) {
 		}
 	}
 
-	accountName := cfg.OPDesktopAccountName
-	if accountName == "" {
-		accountName = os.Getenv(OPDesktopEnvAccountName)
-		if accountName == "" {
-			errs = append(errs, OPDesktopErrAccountName)
+	accountID := cfg.OPDesktopAccountID
+	if accountID == "" {
+		accountID = os.Getenv(OPDesktopEnvAccountID)
+		if accountID == "" {
+			errs = append(errs, OPDesktopErrAccountID)
 		}
 	}
 
@@ -107,7 +107,7 @@ func NewOPDesktopKeyring(cfg *Config) (*OPDesktopKeyring, error) {
 			},
 			Timeout: timeout,
 		},
-		DesktopAccountName: accountName,
+		DesktopAccountID: accountID,
 	}
 
 	return keyring, nil
@@ -121,7 +121,8 @@ func (k *OPDesktopKeyring) InitializeClient() error {
 
 	client, err := onepassword.NewClient(
 		context.Background(),
-		onepassword.WithDesktopAppIntegration(k.DesktopAccountName),
+		// account name or account UUID for Desktop Integration
+		onepassword.WithDesktopAppIntegration(k.DesktopAccountID),
 		onepassword.WithIntegrationInfo(OPStandardIntegrationName, OPStandardIntegrationVersion),
 	)
 	if err != nil {
