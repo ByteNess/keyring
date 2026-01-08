@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"time"
 
@@ -12,114 +11,17 @@ import (
 )
 
 const (
-	OPStandardEnvToken           = "OP_SERVICE_ACCOUNT_TOKEN"
 	OPStandardIntegrationName    = "keyring"
 	OPStandardIntegrationVersion = "v1.0.0"
 	OPStandardItemCategory       = onepassword.ItemCategoryAPICredentials
 	OPStandardItemFieldType      = onepassword.ItemFieldTypeConcealed
 )
 
-var (
-	OPStandardErrClient    = errors.New("Unable to create a 1Password Service Accounts client")
-	OPStandardErrKeyring   = errors.New("Unable to create a 1Password Service Accounts keyring")
-	OPStandardErrNewClient = fmt.Errorf(
-		"%w: onepassword.NewClient returned an error",
-		OPStandardErrClient,
-	)
-	OPStandardErrTimeout = fmt.Errorf(
-		"%w: Timeout must be a non-zero duration",
-		OPStandardErrKeyring,
-	)
-)
-
-func init() {
-	supportedBackends[OPBackend] = opener(func(cfg Config) (Keyring, error) {
-		keyring, err := NewOPStandardKeyring(&cfg)
-		if err != nil {
-			return nil, err
-		}
-		return *keyring, nil
-	})
-}
-
+// OPStandardKeyring contains shared logic for all onepassword-sdk-go based backends
 type OPStandardKeyring struct {
 	OPBaseKeyring
 	Timeout time.Duration
 	Client  OPStandardClientAPI
-}
-
-func NewOPStandardKeyring(cfg *Config) (*OPStandardKeyring, error) {
-	errs := []error{}
-
-	timeout := cfg.OPTimeout
-	if timeout == 0 {
-		errs = append(errs, OPStandardErrTimeout)
-	}
-
-	vaultID := cfg.OPVaultID
-	if vaultID == "" {
-		vaultID = os.Getenv(OPEnvVaultID)
-		if vaultID == "" {
-			errs = append(errs, OPErrVaultID)
-		}
-	}
-
-	itemTitlePrefix := cfg.OPItemTitlePrefix
-	if itemTitlePrefix == "" {
-		itemTitlePrefix = OPItemTitlePrefix
-	}
-
-	itemTag := cfg.OPItemTag
-	if itemTag == "" {
-		itemTag = OPItemTag
-	}
-
-	itemFieldTitle := cfg.OPItemFieldTitle
-	if itemFieldTitle == "" {
-		itemFieldTitle = OPItemFieldTitle
-	}
-
-	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
-	}
-
-	keyring := &OPStandardKeyring{
-		OPBaseKeyring: OPBaseKeyring{
-			VaultID:         vaultID,
-			ItemTitlePrefix: itemTitlePrefix,
-			ItemTag:         itemTag,
-			ItemFieldTitle:  itemFieldTitle,
-			TokenEnvs:       []string{cfg.OPTokenEnv, OPStandardEnvToken},
-			TokenFunc:       cfg.OPTokenFunc,
-		},
-		Timeout: timeout,
-	}
-
-	return keyring, nil
-}
-
-func (k *OPStandardKeyring) InitializeOPStandardClient() error {
-	if k.Client != nil {
-		return nil
-	}
-
-	token, err := k.GetOPToken("Enter 1Password service account token")
-	if err != nil {
-		return err
-	}
-
-	client, err := onepassword.NewClient(
-		context.Background(),
-		onepassword.WithIntegrationInfo(OPStandardIntegrationName, OPStandardIntegrationVersion),
-		onepassword.WithServiceAccountToken(token),
-	)
-	if err != nil {
-		return fmt.Errorf("%w: %w", OPStandardErrNewClient, err)
-	}
-
-	k.Client = client.Items()
-
-	return nil
 }
 
 func (k *OPStandardKeyring) GetOPItem(key string) (*onepassword.Item, error) {
@@ -207,10 +109,6 @@ func (k *OPStandardKeyring) GetOPItems() ([]onepassword.Item, error) {
 }
 
 func (k OPStandardKeyring) Get(key string) (Item, error) {
-	if err := k.InitializeOPStandardClient(); err != nil {
-		return Item{}, err
-	}
-
 	opItem, err := k.GetOPItem(key)
 	if err != nil {
 		return Item{}, err
@@ -227,10 +125,6 @@ func (k OPStandardKeyring) GetMetadata(key string) (Metadata, error) {
 }
 
 func (k OPStandardKeyring) Set(item Item) error {
-	if err := k.InitializeOPStandardClient(); err != nil {
-		return err
-	}
-
 	opItem, err := k.GetOPItem(item.Key)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
 		return err
@@ -289,10 +183,6 @@ func (k OPStandardKeyring) Set(item Item) error {
 }
 
 func (k OPStandardKeyring) Remove(key string) error {
-	if err := k.InitializeOPStandardClient(); err != nil {
-		return err
-	}
-
 	opItem, err := k.GetOPItem(key)
 	if err != nil {
 		return err
@@ -313,10 +203,6 @@ func (k OPStandardKeyring) Remove(key string) error {
 }
 
 func (k OPStandardKeyring) Keys() ([]string, error) {
-	if err := k.InitializeOPStandardClient(); err != nil {
-		return nil, err
-	}
-
 	opItems, err := k.GetOPItems()
 	if err != nil {
 		return nil, err

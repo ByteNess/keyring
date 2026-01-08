@@ -21,12 +21,12 @@ const (
 var (
 	ErrEnvUnsetOrEmpty = errors.New("Environment variable unset or empty")
 	OPErrClient        = errors.New(
-		"Unable to create a 1Password Connect / Service Accounts client",
+		"Unable to create a 1Password Connect / Service Accounts / Desktop Integration client",
 	)
 	OPErrItemMultiple       = errors.New("Found multiple matching 1Password items")
 	OPErrItemTitleDuplicate = errors.New("Found duplicate 1Password item title")
 	OPErrKeyring            = errors.New(
-		"Unable to create a 1Password Connect / Service Accounts keyring",
+		"Unable to create a 1Password Connect / Service Accounts / Desktop Integration keyring",
 	)
 	OPErrTokenFuncNil = fmt.Errorf("%w: Token function is nil", OPErrClient)
 	OPErrVaultID      = fmt.Errorf("%w: %w: %#v", OPErrKeyring, ErrEnvUnsetOrEmpty, OPEnvVaultID)

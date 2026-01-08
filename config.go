@@ -95,4 +95,7 @@ type Config struct {
 
 	// OPTokenFunc is the function used to prompt the user for the 1Password Connect / service account token
 	OPTokenFunc PromptFunc
+
+	// OPDesktopAccountID is the 1Password account name or UUIDj for Desktop Integration (1Password Desktop App only)
+	OPDesktopAccountID string
 }
