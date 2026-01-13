@@ -127,9 +127,16 @@ func (k *passKeyring) Remove(key string) error {
 
 func (k *passKeyring) itemExists(key string) bool {
 	var path = filepath.Join(k.dir, k.prefix, key+".gpg")
-	_, err := os.Stat(path)
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
 
-	return err == nil
+	path = filepath.Join(k.dir, k.prefix, key+".age")
+	if _, err := os.Stat(path); err == nil {
+		return true
+	}
+
+	return false
 }
 
 func (k *passKeyring) Keys() ([]string, error) {
@@ -152,12 +159,15 @@ func (k *passKeyring) Keys() ([]string, error) {
 			return err
 		}
 
-		if !info.IsDir() && filepath.Ext(p) == ".gpg" {
-			name := strings.TrimPrefix(p, path)
-			if name[0] == os.PathSeparator {
-				name = name[1:]
+		if !info.IsDir() {
+			ext := filepath.Ext(p)
+			if ext == ".gpg" || ext == ".age" {
+				name := strings.TrimPrefix(p, path)
+				if name[0] == os.PathSeparator {
+					name = name[1:]
+				}
+				keys = append(keys, name[:len(name)-len(ext)])
 			}
-			keys = append(keys, name[:len(name)-4])
 		}
 		return nil
 	})
