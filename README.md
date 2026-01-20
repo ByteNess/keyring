@@ -78,6 +78,6 @@ To make a contribution:
   * Make your changes on the fork
   * Submit a pull request back to this repo with a clear description of the problem you're solving
   * Ensure your PR passes all current (and new) tests
-  * Ideally verify that [aws-vault](https://github.com/bteness/aws-vault) works with your changes (optional)
+  * Ideally verify that [aws-vault](https://github.com/byteness/aws-vault) works with your changes (optional)
 
 ...and we'll do our best to get your work merged in!
