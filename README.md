@@ -15,6 +15,7 @@ Currently Keyring supports the following backends
  * Secret Service ([Gnome Keyring](https://wiki.gnome.org/Projects/GnomeKeyring), [KWallet](https://kde.org/applications/system/org.kde.kwalletmanager5))
  * [KWallet](https://kde.org/applications/system/org.kde.kwalletmanager5)
  * [Pass](https://www.passwordstore.org/)
+ * [Passage](https://github.com/FiloSottile/passage)
  * [Encrypted file (JWT)](https://datatracker.ietf.org/doc/html/rfc7519)
  * [KeyCtl](https://linux.die.net/man/1/keyctl)
  * [1Password Connect](https://developer.1password.com/docs/connect/)

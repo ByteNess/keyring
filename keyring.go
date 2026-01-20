@@ -20,6 +20,7 @@ const (
 	WinCredBackend       BackendType = "wincred"
 	FileBackend          BackendType = "file"
 	PassBackend          BackendType = "pass"
+	PassageBackend       BackendType = "passage"
 	OPBackend            BackendType = "op"
 	OPConnectBackend     BackendType = "op-connect"
 	OPDesktopBackend     BackendType = "op-desktop"
@@ -42,6 +43,7 @@ var backendOrder = []BackendType{
 	KeyCtlBackend,
 	// General
 	PassBackend,
+	PassageBackend,
 	FileBackend,
 	// 1Password
 	OPConnectBackend,
