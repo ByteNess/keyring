@@ -340,7 +340,7 @@ func (k *keychain) openWithTouchID() (gokeychain.Keychain, error) {
 
 	debugf("checking with touchid")
 	if err := touchid.Authenticate(context.Background(), touchid.PolicyDeviceOwnerAuthentication, "unlock "+k.path); err != nil {
-		return gokeychain.Keychain{}, fmt.Errorf("failed to authenticate with biometrics: %v", err)
+		return gokeychain.Keychain{}, fmt.Errorf("failed to authenticate with biometrics: %w", err)
 	}
 
 	k.isTouchIDAuthenticated = true
