@@ -4,6 +4,7 @@
 package keyring
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +12,7 @@ import (
 	gokeychain "github.com/byteness/go-keychain"
 	"golang.org/x/crypto/ssh/terminal"
 
-	"github.com/lox/go-touchid"
+	"github.com/noamcohen97/touchid-go"
 )
 
 const (
@@ -338,12 +339,8 @@ func (k *keychain) openWithTouchID() (gokeychain.Keychain, error) {
 	}
 
 	debugf("checking with touchid")
-	ok, err := touchid.Authenticate("unlock " + k.path)
-	if err != nil {
+	if err := touchid.Authenticate(context.Background(), touchid.PolicyDeviceOwnerAuthentication, "unlock "+k.path); err != nil {
 		return gokeychain.Keychain{}, fmt.Errorf("failed to authenticate with biometrics: %v", err)
-	}
-	if !ok {
-		return gokeychain.Keychain{}, fmt.Errorf("failed to authenticate with biometrics")
 	}
 
 	k.isTouchIDAuthenticated = true
