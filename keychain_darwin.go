@@ -1,5 +1,4 @@
-//go:build darwin && cgo
-// +build darwin,cgo
+//go:build darwin && !ios && cgo
 
 package keyring
 
