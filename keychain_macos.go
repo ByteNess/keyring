@@ -1,5 +1,4 @@
-//go:build darwin && cgo
-// +build darwin,cgo
+//go:build darwin && !ios && cgo
 
 package keyring
 
@@ -41,8 +40,10 @@ func init() {
 			service:      cfg.ServiceName,
 			passwordFunc: cfg.KeychainPasswordFunc,
 
-			// Set the isAccessibleWhenUnlocked to the boolean value of
-			// KeychainAccessibleWhenUnlocked is a shorthand for setting the accessibility value.
+			isSynchronizable: cfg.KeychainSynchronizable,
+
+			// Set isAccessibleWhenUnlocked to the boolean value of KeychainAccessibleWhenUnlocked,
+			// which is a shorthand for setting the accessibility value.
 			// See: https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlocked
 			isAccessibleWhenUnlocked: cfg.KeychainAccessibleWhenUnlocked,
 
