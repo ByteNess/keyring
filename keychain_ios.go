@@ -26,6 +26,8 @@ func init() {
 			service:      cfg.ServiceName,
 			passwordFunc: cfg.KeychainPasswordFunc,
 
+			isSynchronizable: cfg.KeychainSynchronizable,
+
 			// Set the isAccessibleWhenUnlocked to the boolean value of
 			// KeychainAccessibleWhenUnlocked is a shorthand for setting the accessibility value.
 			// See: https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlocked
