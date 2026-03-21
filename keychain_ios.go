@@ -1,4 +1,6 @@
 //go:build ios && cgo
+// NOTE: Due to newer versions of Go's crypto library requiring SecTrustCopyCertificateChain,
+// this requires iOS 15.0 or later.
 
 package keyring
 
