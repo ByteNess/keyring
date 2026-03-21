@@ -42,8 +42,8 @@ func init() {
 
 			isSynchronizable: cfg.KeychainSynchronizable,
 
-			// Set the isAccessibleWhenUnlocked to the boolean value of
-			// KeychainAccessibleWhenUnlocked is a shorthand for setting the accessibility value.
+			// Set isAccessibleWhenUnlocked to the boolean value of KeychainAccessibleWhenUnlocked,
+			// which is a shorthand for setting the accessibility value.
 			// See: https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlocked
 			isAccessibleWhenUnlocked: cfg.KeychainAccessibleWhenUnlocked,
 
