@@ -35,7 +35,7 @@ const (
 var backendOrder = []BackendType{
 	// Windows
 	WinCredBackend,
-	// MacOS
+	// MacOS & iOS
 	KeychainBackend,
 	// Linux
 	SecretServiceBackend,
