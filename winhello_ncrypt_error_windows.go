@@ -66,7 +66,6 @@ func isWinHelloNCryptUserCancelled(err error) bool {
 }
 
 func isWinHelloNCryptSetupRequired(err error) bool {
-	return errors.Is(err, errWinHelloNCryptBadKeyset) ||
-		errors.Is(err, errWinHelloNCryptNotSupported) ||
+	return errors.Is(err, errWinHelloNCryptNotSupported) ||
 		errors.Is(err, errWinHelloNCryptDeviceNotReady)
 }

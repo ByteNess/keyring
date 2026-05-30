@@ -58,7 +58,6 @@ func TestWinHelloNCryptUserCancelledClassification(t *testing.T) {
 
 func TestWinHelloNCryptSetupRequiredClassification(t *testing.T) {
 	for _, status := range []uintptr{
-		uintptr(errWinHelloNCryptBadKeyset),
 		uintptr(errWinHelloNCryptNotSupported),
 		uintptr(errWinHelloNCryptDeviceNotReady),
 	} {
@@ -73,9 +72,14 @@ func TestWinHelloNCryptSetupRequiredClassification(t *testing.T) {
 }
 
 func TestWinHelloNCryptSetupHintNotAddedToOtherErrors(t *testing.T) {
-	err := winHelloNCryptError(uintptr(errWinHelloNCryptUserCancelled))
-	if strings.Contains(err.Error(), winHelloNCryptSetupHint) {
-		t.Fatalf("unexpected setup hint on user-cancelled error: %v", err)
+	for _, status := range []uintptr{
+		uintptr(errWinHelloNCryptUserCancelled),
+		uintptr(errWinHelloNCryptBadKeyset),
+	} {
+		err := winHelloNCryptError(status)
+		if strings.Contains(err.Error(), winHelloNCryptSetupHint) {
+			t.Fatalf("unexpected setup hint on status %#x: %v", status, err)
+		}
 	}
 }
 
@@ -118,6 +122,57 @@ func TestWinHelloNCryptSoftwareKeyRoundTrip(t *testing.T) {
 		}
 	})
 
+	key, err := winHelloNCryptCreatePersistedKey(provider, winHelloNCryptRSAAlgorithm, "", 0, 0)
+	if err != nil {
+		t.Fatalf("create ephemeral key failed: %v", err)
+	}
+	createdHandle := key
+	t.Cleanup(func() {
+		if createdHandle != 0 {
+			if err := winHelloNCryptFreeObject(createdHandle); err != nil {
+				t.Fatalf("free created key failed: %v", err)
+			}
+		}
+	})
+
+	if err := winHelloNCryptSetUint32Property(key, winHelloNCryptLengthProperty, 2048); err != nil {
+		t.Fatalf("set key length property failed: %v", err)
+	}
+	if err := winHelloNCryptSetUint32Property(key, winHelloNCryptKeyUsageProperty, winHelloNCryptAllowDecryptFlag|winHelloNCryptAllowSigningFlag); err != nil {
+		t.Fatalf("set key usage property failed: %v", err)
+	}
+	if err := winHelloNCryptFinalizeKey(key, 0); err != nil {
+		t.Fatalf("finalize key failed: %v", err)
+	}
+
+	plaintext := []byte("step5 software key roundtrip")
+	ciphertext, err := winHelloNCryptEncrypt(key, plaintext, nil, winHelloNCryptPadPKCS1Flag)
+	if err != nil {
+		t.Fatalf("encrypt failed: %v", err)
+	}
+
+	decrypted, err := winHelloNCryptDecrypt(key, ciphertext, nil, winHelloNCryptPadPKCS1Flag)
+	if err != nil {
+		t.Fatalf("decrypt failed: %v", err)
+	}
+	if string(decrypted) != string(plaintext) {
+		t.Fatalf("plaintext mismatch: got %q want %q", decrypted, plaintext)
+	}
+}
+
+func TestWinHelloNCryptPersistedSoftwareKeyRoundTrip(t *testing.T) {
+	requireWinHelloNCryptPersistedIntegration(t)
+
+	provider, err := winHelloNCryptOpenStorageProvider(winHelloNCryptSoftwareProvider)
+	if err != nil {
+		t.Fatalf("open software provider failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := winHelloNCryptFreeObject(provider); err != nil {
+			t.Fatalf("free software provider failed: %v", err)
+		}
+	})
+
 	keyName := fmt.Sprintf("keyring-winhello-step5-%d", time.Now().UnixNano())
 	key, err := winHelloNCryptCreatePersistedKey(provider, winHelloNCryptRSAAlgorithm, keyName, 0, 0)
 	if err != nil {
@@ -132,10 +187,10 @@ func TestWinHelloNCryptSoftwareKeyRoundTrip(t *testing.T) {
 		}
 	})
 
-	if err := winHelloNCryptSetUint32Property(key, winHelloNCryptLengthProperty, 2048, 0); err != nil {
+	if err := winHelloNCryptSetUint32Property(key, winHelloNCryptLengthProperty, 2048); err != nil {
 		t.Fatalf("set key length property failed: %v", err)
 	}
-	if err := winHelloNCryptSetUint32Property(key, winHelloNCryptKeyUsageProperty, winHelloNCryptAllowDecryptFlag|winHelloNCryptAllowSigningFlag, 0); err != nil {
+	if err := winHelloNCryptSetUint32Property(key, winHelloNCryptKeyUsageProperty, winHelloNCryptAllowDecryptFlag|winHelloNCryptAllowSigningFlag); err != nil {
 		t.Fatalf("set key usage property failed: %v", err)
 	}
 	if err := winHelloNCryptFinalizeKey(key, 0); err != nil {
@@ -156,7 +211,7 @@ func TestWinHelloNCryptSoftwareKeyRoundTrip(t *testing.T) {
 		}
 	})
 
-	plaintext := []byte("step5 software key roundtrip")
+	plaintext := []byte("step5 persisted software key roundtrip")
 	ciphertext, err := winHelloNCryptEncrypt(key, plaintext, nil, winHelloNCryptPadPKCS1Flag)
 	if err != nil {
 		t.Fatalf("encrypt failed: %v", err)
@@ -168,6 +223,12 @@ func TestWinHelloNCryptSoftwareKeyRoundTrip(t *testing.T) {
 	}
 	if string(decrypted) != string(plaintext) {
 		t.Fatalf("plaintext mismatch: got %q want %q", decrypted, plaintext)
+	}
+}
+
+func TestWinHelloNCryptCryptRejectsEmptyInput(t *testing.T) {
+	if _, err := winHelloNCryptEncrypt(0, nil, nil, 0); !errors.Is(err, errWinHelloNCryptEmptyInput) {
+		t.Fatalf("encrypt error = %v, want %v", err, errWinHelloNCryptEmptyInput)
 	}
 }
 
@@ -192,5 +253,12 @@ func requireWinHelloNCryptIntegration(t *testing.T) {
 	t.Helper()
 	if os.Getenv("KEYRING_WINHELLO_TEST") != "1" {
 		t.Skip("set KEYRING_WINHELLO_TEST=1 to run WinHello NCrypt integration tests")
+	}
+}
+
+func requireWinHelloNCryptPersistedIntegration(t *testing.T) {
+	t.Helper()
+	if os.Getenv("KEYRING_NCRYPT_TEST") != "1" {
+		t.Skip("set KEYRING_NCRYPT_TEST=1 to run persisted NCrypt integration tests")
 	}
 }

@@ -4,10 +4,13 @@
 package keyring
 
 import (
+	"errors"
 	"fmt"
 	"syscall"
 	"unsafe"
 )
+
+var errWinHelloNCryptEmptyInput = errors.New("NCrypt input is empty")
 
 var (
 	// Docs: https://learn.microsoft.com/en-us/windows/win32/api/ncrypt/
@@ -69,9 +72,14 @@ func winHelloNCryptCreatePersistedKey(provider ncryptHandle, algorithm string, k
 	if err != nil {
 		return 0, fmt.Errorf("encode algorithm %q: %w", algorithm, err)
 	}
-	keyNameUTF16, err := syscall.UTF16PtrFromString(keyName)
-	if err != nil {
-		return 0, fmt.Errorf("encode key name: %w", err)
+
+	var keyNamePtr uintptr
+	if keyName != "" {
+		keyNameUTF16, err := syscall.UTF16PtrFromString(keyName)
+		if err != nil {
+			return 0, fmt.Errorf("encode key name: %w", err)
+		}
+		keyNamePtr = uintptr(unsafe.Pointer(keyNameUTF16))
 	}
 
 	var key ncryptHandle
@@ -80,7 +88,7 @@ func winHelloNCryptCreatePersistedKey(provider ncryptHandle, algorithm string, k
 		uintptr(provider),
 		uintptr(unsafe.Pointer(&key)),
 		uintptr(unsafe.Pointer(algorithmUTF16)),
-		uintptr(unsafe.Pointer(keyNameUTF16)),
+		keyNamePtr,
 		uintptr(legacyKeySpec),
 		uintptr(flags),
 	); err != nil {
@@ -94,6 +102,9 @@ func winHelloNCryptSetProperty(handle ncryptHandle, property string, value []byt
 	propertyUTF16, err := syscall.UTF16PtrFromString(property)
 	if err != nil {
 		return fmt.Errorf("encode property %q: %w", property, err)
+	}
+	if err := winHelloCheckDWORDLength(property, len(value)); err != nil {
+		return err
 	}
 
 	var valuePtr uintptr
@@ -115,9 +126,9 @@ func winHelloNCryptSetProperty(handle ncryptHandle, property string, value []byt
 	return nil
 }
 
-func winHelloNCryptSetUint32Property(handle ncryptHandle, property string, value uint32, flags uint32) error {
+func winHelloNCryptSetUint32Property(handle ncryptHandle, property string, value uint32) error {
 	valueBytes := unsafe.Slice((*byte)(unsafe.Pointer(&value)), int(unsafe.Sizeof(value)))
-	return winHelloNCryptSetProperty(handle, property, valueBytes, flags)
+	return winHelloNCryptSetProperty(handle, property, valueBytes, 0)
 }
 
 func winHelloNCryptFinalizeKey(key ncryptHandle, flags uint32) error {
@@ -150,6 +161,13 @@ func winHelloNCryptCall(proc *syscall.LazyProc, args ...uintptr) error {
 }
 
 func winHelloNCryptCrypt(proc *syscall.LazyProc, key ncryptHandle, input []byte, paddingInfo unsafe.Pointer, flags uint32) ([]byte, error) {
+	if len(input) == 0 {
+		return nil, errWinHelloNCryptEmptyInput
+	}
+	if err := winHelloCheckDWORDLength("input", len(input)); err != nil {
+		return nil, err
+	}
+
 	var outputLen uint32
 	if err := winHelloNCryptCall(
 		proc,
@@ -166,6 +184,9 @@ func winHelloNCryptCrypt(proc *syscall.LazyProc, key ncryptHandle, input []byte,
 	}
 
 	output := make([]byte, outputLen)
+	if err := winHelloCheckDWORDLength("output", len(output)); err != nil {
+		return nil, err
+	}
 	if err := winHelloNCryptCall(
 		proc,
 		uintptr(key),
@@ -189,4 +210,12 @@ func winHelloSlicePtr(data []byte) *byte {
 	}
 
 	return &data[0]
+}
+
+func winHelloCheckDWORDLength(name string, n int) error {
+	if n < 0 || uint64(n) > uint64(^uint32(0)) {
+		return fmt.Errorf("%s too large for NCrypt call: %d bytes", name, n)
+	}
+
+	return nil
 }
