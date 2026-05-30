@@ -18,6 +18,7 @@ const (
 	KeyCtlBackend        BackendType = "keyctl"
 	KWalletBackend       BackendType = "kwallet"
 	WinCredBackend       BackendType = "wincred"
+	WinHelloBackend      BackendType = "winhello"
 	FileBackend          BackendType = "file"
 	PassBackend          BackendType = "pass"
 	PassageBackend       BackendType = "passage"
@@ -35,6 +36,7 @@ const (
 var backendOrder = []BackendType{
 	// Windows
 	WinCredBackend,
+	WinHelloBackend,
 	// MacOS & iOS
 	KeychainBackend,
 	// Linux
