@@ -12,6 +12,7 @@ const (
 	winHelloProviderPassportKSP = "Microsoft Passport Key Storage Provider"
 
 	winHelloContentAlgAES256GCM = "AES-256-GCM"
+	winHelloAESGCMNonceSize     = 12
 	winHelloWrapAlgRSAPKCS1v15  = "RSAES-PKCS1-v1_5"
 )
 
@@ -36,27 +37,35 @@ type winHelloEnvelope struct {
 	Nonce      []byte `json:"nonce"`
 	WrappedCEK []byte `json:"wrapped_cek"`
 	Ciphertext []byte `json:"ciphertext"`
-	AAD        []byte `json:"aad"`
+	// AAD is stored for diagnostics and envelope self-description only.
+	// Decryption must recompute the expected AAD from external context,
+	// compare it against this value, and use the recomputed AAD as authoritative.
+	AAD []byte `json:"aad"`
 }
 
 func (e winHelloEnvelope) validate() error {
-	if e.Version != winHelloEnvelopeVersion {
+	if e.Version != winHelloEnvelopeVersion { // Currently only version 1 is supported (future expansion possible)
 		return fmt.Errorf("%w: %d", errWinHelloEnvelopeVersion, e.Version)
 	}
-	if e.Provider != winHelloProviderPassportKSP {
+	if e.Provider != winHelloProviderPassportKSP { // Currently only Microsoft Passport KSP is supported (future expansion possible)
 		return fmt.Errorf("%w: %q", errWinHelloEnvelopeProvider, e.Provider)
 	}
-	if e.KeyName == "" {
+	if e.KeyName == "" { // Key name is required to identify the key in KSP
 		return errWinHelloEnvelopeKeyName
 	}
-	if e.ContentAlg != winHelloContentAlgAES256GCM {
+	if e.ContentAlg != winHelloContentAlgAES256GCM { // Currently only AES-256-GCM is supported (future expansion possible)
 		return fmt.Errorf("%w: %q", errWinHelloEnvelopeContentAlg, e.ContentAlg)
 	}
-	if e.WrapAlg != winHelloWrapAlgRSAPKCS1v15 {
+	if e.WrapAlg != winHelloWrapAlgRSAPKCS1v15 { // Currently only RSAES-PKCS1-v1_5 is supported (future expansion possible)
 		return fmt.Errorf("%w: %q", errWinHelloEnvelopeWrapAlg, e.WrapAlg)
 	}
-	if len(e.Nonce) == 0 {
-		return errWinHelloEnvelopeNonce
+	if len(e.Nonce) != winHelloAESGCMNonceSize {
+		return fmt.Errorf(
+			"%w: got %d want %d",
+			errWinHelloEnvelopeNonce,
+			len(e.Nonce),
+			winHelloAESGCMNonceSize,
+		)
 	}
 	if len(e.WrappedCEK) == 0 {
 		return errWinHelloEnvelopeWrappedCEK
