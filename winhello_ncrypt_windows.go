@@ -131,6 +131,21 @@ func winHelloNCryptSetUint32Property(handle ncryptHandle, property string, value
 	return winHelloNCryptSetProperty(handle, property, valueBytes, 0)
 }
 
+func winHelloNCryptSetStringProperty(handle ncryptHandle, property string, value string) error {
+	valueUTF16, err := syscall.UTF16FromString(value)
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", property, err)
+	}
+
+	valueBytes := unsafe.Slice((*byte)(unsafe.Pointer(&valueUTF16[0])), len(valueUTF16)*2)
+	return winHelloNCryptSetProperty(handle, property, valueBytes, 0)
+}
+
+func winHelloNCryptSetHandleProperty(handle ncryptHandle, property string, value uintptr) error {
+	valueBytes := unsafe.Slice((*byte)(unsafe.Pointer(&value)), int(unsafe.Sizeof(value)))
+	return winHelloNCryptSetProperty(handle, property, valueBytes, 0)
+}
+
 func winHelloNCryptFinalizeKey(key ncryptHandle, flags uint32) error {
 	return winHelloNCryptCall(procWinHelloNCryptFinalizeKey, uintptr(key), uintptr(flags))
 }
