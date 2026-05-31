@@ -50,7 +50,9 @@ var (
 		return &winHelloGenericCredentialAdapter{credential: cred}, nil
 	}
 	winHelloNewGenericCredentialFunc = func(target string) winHelloWinCredCredential {
-		return &winHelloGenericCredentialAdapter{credential: wincred.NewGenericCredential(target)}
+		cred := wincred.NewGenericCredential(target)
+		cred.Persist = wincred.PersistLocalMachine
+		return &winHelloGenericCredentialAdapter{credential: cred}
 	}
 	winHelloListCredentialsFunc = func() ([]winHelloWinCredListEntry, error) {
 		creds, err := wincred.List()
@@ -128,7 +130,16 @@ func (s *winHelloWinCredStore) Delete(key string) error {
 		return err
 	}
 
-	return cred.Delete()
+	// Prevent raw error from Delete() from leaking out of the store in case of a race condition where the credential is deleted between our Get and Delete calls
+	if err := cred.Delete(); err != nil {
+		if errors.Is(err, elementNotFoundError) {
+			return ErrKeyNotFound
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 func (s *winHelloWinCredStore) Keys() ([]string, error) {

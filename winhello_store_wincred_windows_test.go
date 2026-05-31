@@ -89,6 +89,21 @@ func TestWinHelloWinCredStoreDeleteMissingReturnsKeyNotFound(t *testing.T) {
 	}
 }
 
+func TestWinHelloWinCredStoreDeleteMapsDeleteRaceToKeyNotFound(t *testing.T) {
+	restore := stubWinHelloWinCredHooks(t)
+	defer restore()
+
+	winHelloGetGenericCredentialFunc = func(_ string) (winHelloWinCredCredential, error) {
+		return &fakeWinHelloWinCredCredential{deleteErr: elementNotFoundError}, nil
+	}
+
+	store := newWinHelloWinCredStore("delete-race")
+	err := store.Delete("key")
+	if !errors.Is(err, ErrKeyNotFound) {
+		t.Fatalf("Delete() error = %v, want %v", err, ErrKeyNotFound)
+	}
+}
+
 func TestWinHelloWinCredStoreKeysReturnsListError(t *testing.T) {
 	restore := stubWinHelloWinCredHooks(t)
 	defer restore()
