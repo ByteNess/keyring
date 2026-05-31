@@ -17,12 +17,13 @@ const (
 	winHelloNCryptRSAAlgorithm     = "RSA"
 	winHelloNCryptSoftwareProvider = "Microsoft Software Key Storage Provider"
 
-	winHelloNCryptLengthProperty             = "Length"
-	winHelloNCryptKeyUsageProperty           = "Key Usage"
-	winHelloNCryptNgcCacheTypeProperty       = "NgcCacheType"
-	winHelloNCryptNgcCacheTypeLegacyProperty = "NgcCacheTypeProperty"
-	winHelloNCryptUseContextProperty         = "Use Context"
-	winHelloNCryptWindowHandleProperty       = "HWND Handle"
+	winHelloNCryptLengthProperty                    = "Length"
+	winHelloNCryptKeyUsageProperty                  = "Key Usage"
+	winHelloNCryptNgcCacheTypeProperty              = "NgcCacheType"
+	winHelloNCryptNgcCacheTypeLegacyProperty        = "NgcCacheTypeProperty"
+	winHelloNCryptPinCacheIsGestureRequiredProperty = "PinCacheIsGestureRequired"
+	winHelloNCryptUseContextProperty                = "Use Context"
+	winHelloNCryptWindowHandleProperty              = "HWND Handle"
 
 	winHelloNCryptPadPKCS1Flag = 0x00000002
 
