@@ -617,7 +617,7 @@ func TestWinHelloWithOperationKeyMapsMissingPassportKey(t *testing.T) {
 func TestWinHelloWrapRoundTrip(t *testing.T) {
 	requireWinHelloPassportIntegration(t)
 
-	logicalName := newWinHelloPassportTestLogicalName("step9")
+	logicalName := newWinHelloPassportTestLogicalName("wrap")
 	t.Cleanup(func() {
 		cleanupWinHelloPassportKey(t, logicalName)
 	})

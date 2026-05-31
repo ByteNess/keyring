@@ -177,7 +177,7 @@ func TestWinHelloWinCredStoreWriteUsesCredentialBlob(t *testing.T) {
 func TestWinHelloWinCredStoreReadWriteDeleteRoundTrip(t *testing.T) {
 	store := newWinHelloWinCredStore(newWinHelloWinCredTestServiceName("roundtrip"))
 	key := fmt.Sprintf("item-%d", time.Now().UnixNano())
-	data := []byte("{\"ciphertext\":\"step11-roundtrip\"}")
+	data := []byte("{\"ciphertext\":\"winhello-roundtrip\"}")
 
 	t.Cleanup(func() {
 		_ = store.Delete(key)

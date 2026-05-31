@@ -102,7 +102,7 @@ func TestNewWinHelloKeyringDefaultsServiceName(t *testing.T) {
 	defer restore()
 
 	winHelloPassportLogicalNameFunc = func() string {
-		return "keyring-winhello-test-step12-defaults"
+		return "keyring-winhello-test-backend-defaults"
 	}
 
 	ring, err := newWinHelloKeyring("")
@@ -434,7 +434,7 @@ func TestWinHelloKeyringIntegration(t *testing.T) {
 	restore := stubWinHelloKeyringHooks(t)
 	defer restore()
 
-	logicalName := newWinHelloPassportTestLogicalName("step12")
+	logicalName := newWinHelloPassportTestLogicalName("backend")
 	winHelloPassportLogicalNameFunc = func() string {
 		return logicalName
 	}
@@ -442,14 +442,14 @@ func TestWinHelloKeyringIntegration(t *testing.T) {
 		cleanupWinHelloPassportKey(t, logicalName)
 	})
 
-	serviceName := newWinHelloWinCredTestServiceName("step12")
+	serviceName := newWinHelloWinCredTestServiceName("backend")
 	ring, err := newWinHelloKeyring(serviceName)
 	if err != nil {
 		t.Fatalf("newWinHelloKeyring() failed: %v", err)
 	}
 
 	key := fmt.Sprintf("item-%d", time.Now().UnixNano())
-	plaintext := []byte("step12-integration-secret")
+	plaintext := []byte("winhello-integration-secret")
 	t.Cleanup(func() {
 		_ = ring.Remove(key)
 	})

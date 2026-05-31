@@ -145,7 +145,7 @@ func TestWinHelloNCryptSoftwareKeyRoundTrip(t *testing.T) {
 		t.Fatalf("finalize key failed: %v", err)
 	}
 
-	plaintext := []byte("step5 software key roundtrip")
+	plaintext := []byte("software key roundtrip")
 	ciphertext, err := winHelloNCryptEncrypt(key, plaintext, nil, winHelloNCryptPadPKCS1Flag)
 	if err != nil {
 		t.Fatalf("encrypt failed: %v", err)
@@ -173,7 +173,7 @@ func TestWinHelloNCryptPersistedSoftwareKeyRoundTrip(t *testing.T) {
 		}
 	})
 
-	keyName := fmt.Sprintf("keyring-winhello-step5-%d", time.Now().UnixNano())
+	keyName := fmt.Sprintf("keyring-winhello-software-%d", time.Now().UnixNano())
 	key, err := winHelloNCryptCreatePersistedKey(provider, winHelloNCryptRSAAlgorithm, keyName, 0, 0)
 	if err != nil {
 		t.Fatalf("create persisted key failed: %v", err)
@@ -211,7 +211,7 @@ func TestWinHelloNCryptPersistedSoftwareKeyRoundTrip(t *testing.T) {
 		}
 	})
 
-	plaintext := []byte("step5 persisted software key roundtrip")
+	plaintext := []byte("persisted software key roundtrip")
 	ciphertext, err := winHelloNCryptEncrypt(key, plaintext, nil, winHelloNCryptPadPKCS1Flag)
 	if err != nil {
 		t.Fatalf("encrypt failed: %v", err)

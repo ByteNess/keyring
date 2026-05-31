@@ -106,7 +106,7 @@ func TestWinHelloPassportEnsureCreatesKey(t *testing.T) {
 		if provider != ncryptHandle(21) {
 			t.Fatalf("provider handle = %d, want %d", provider, ncryptHandle(21))
 		}
-		if !strings.Contains(keyName, "/step7-create") {
+		if !strings.Contains(keyName, "/create-passport") {
 			t.Fatalf("key name = %q, want derived logical name suffix", keyName)
 		}
 		if created {
@@ -125,7 +125,7 @@ func TestWinHelloPassportEnsureCreatesKey(t *testing.T) {
 		if legacyKeySpec != 0 || flags != 0 {
 			t.Fatalf("create key args = (%d, %d), want (0, 0)", legacyKeySpec, flags)
 		}
-		if !strings.Contains(keyName, "/step7-create") {
+		if !strings.Contains(keyName, "/create-passport") {
 			t.Fatalf("key name = %q, want derived logical name suffix", keyName)
 		}
 		return ncryptHandle(22), nil
@@ -157,7 +157,7 @@ func TestWinHelloPassportEnsureCreatesKey(t *testing.T) {
 		return nil
 	}
 
-	passportKey, err := ensureWinHelloPassportKey("step7-create", 99)
+	passportKey, err := ensureWinHelloPassportKey("create-passport", 99)
 	if err != nil {
 		t.Fatalf("ensureWinHelloPassportKey() failed: %v", err)
 	}
@@ -599,7 +599,7 @@ func runPassportEnsureWindowHandleErrorTest(t *testing.T, testCase passportWindo
 func TestWinHelloPassportCreateAndReopen(t *testing.T) {
 	requireWinHelloPassportIntegration(t)
 
-	logicalName := newWinHelloPassportTestLogicalName("step7")
+	logicalName := newWinHelloPassportTestLogicalName("passport")
 	t.Cleanup(func() {
 		cleanupWinHelloPassportKey(t, logicalName)
 	})
