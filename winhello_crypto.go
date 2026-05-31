@@ -11,6 +11,8 @@ import (
 	"io"
 )
 
+// This file is intentionally built not only on Windows, to allow CI coverage of at least part of the WinHello backend.
+
 const winHelloCEKSize = 32
 
 var (
