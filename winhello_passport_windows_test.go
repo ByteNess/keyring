@@ -645,9 +645,13 @@ func stubWinHelloPassportNCryptHooks(t *testing.T) func() {
 	oldSetHandleProperty := winHelloNCryptSetHandlePropertyFunc
 	oldFinalizeKey := winHelloNCryptFinalizeKeyFunc
 	oldFreeObject := winHelloNCryptFreeObjectFunc
+	oldParentHWND := winHelloParentHWNDFunc
 
 	winHelloNCryptFreeObjectFunc = func(_ ncryptHandle) error {
 		return nil
+	}
+	winHelloParentHWNDFunc = func() uintptr {
+		return 0
 	}
 
 	return func() {
@@ -659,6 +663,7 @@ func stubWinHelloPassportNCryptHooks(t *testing.T) func() {
 		winHelloNCryptSetHandlePropertyFunc = oldSetHandleProperty
 		winHelloNCryptFinalizeKeyFunc = oldFinalizeKey
 		winHelloNCryptFreeObjectFunc = oldFreeObject
+		winHelloParentHWNDFunc = oldParentHWND
 	}
 }
 

@@ -178,6 +178,9 @@ func winHelloSetPassportNgcCacheType(key ncryptHandle) error {
 
 func winHelloSetWindowHandleIfPresent(handle ncryptHandle, hwnd uintptr) error {
 	if hwnd == 0 {
+		hwnd = winHelloParentHWNDFunc()
+	}
+	if hwnd == 0 {
 		return nil
 	}
 
