@@ -107,13 +107,14 @@ func ensureWinHelloPassportKey(logicalName string, hwnd uintptr) (*winHelloPassp
 }
 
 func (key *winHelloPassportKey) Close() error {
-	if key == nil {
+	if key == nil || key.provider == 0 {
 		return nil
 	}
 
-	err := winHelloNCryptFreeObjectFunc(key.provider)
+	provider := key.provider
 	key.provider = 0
-	return err
+
+	return winHelloNCryptFreeObjectFunc(provider)
 }
 
 func winHelloOpenPassportProvider(logicalName string, hwnd uintptr) (ncryptHandle, string, error) {
@@ -127,19 +128,16 @@ func winHelloOpenPassportProvider(logicalName string, hwnd uintptr) (ncryptHandl
 		return 0, "", fmt.Errorf("open Passport provider: %w", err)
 	}
 	// When the caller can supply an HWND, tie any Windows Hello prompt to it so
-	// the UX is foregrounded and owned by the right window.
-	if err := winHelloSetWindowHandleIfPresent(provider, hwnd); err != nil {
-		_ = winHelloNCryptFreeObjectFunc(provider)
-		return 0, "", err
-	}
+	// the UX is foregrounded and owned by the right window. This is best-effort:
+	// prompt ownership should not block otherwise valid Passport operations.
+	_ = winHelloSetWindowHandleIfPresent(provider, hwnd)
 
 	return provider, keyName, nil
 }
 
 func winHelloInitializePassportKey(key ncryptHandle, hwnd uintptr) error {
-	if err := winHelloSetWindowHandleIfPresent(key, hwnd); err != nil {
-		return err
-	}
+	// Key-level prompt ownership is also best-effort for the same reason.
+	_ = winHelloSetWindowHandleIfPresent(key, hwnd)
 	// These properties are the Passport-specific creation shape validated by the
 	// PoC: RSA-2048, decrypt/sign usage, NGC cache policy, and a Use Context
 	// string that Windows Hello can surface in the prompt.
