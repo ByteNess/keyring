@@ -16,6 +16,7 @@ func TestWinHelloWrapKeyUsesPKCS1(t *testing.T) {
 	defer restore()
 
 	var operations []string
+	cek := newWinHelloWrapTestCEK()
 
 	winHelloNCryptOpenStorageProviderFunc = func(providerName string) (ncryptHandle, error) {
 		if providerName != winHelloProviderPassportKSP {
@@ -25,16 +26,20 @@ func TestWinHelloWrapKeyUsesPKCS1(t *testing.T) {
 		return ncryptHandle(201), nil
 	}
 	winHelloNCryptSetHandlePropertyFunc = func(handle ncryptHandle, property string, value uintptr) error {
-		if handle != ncryptHandle(201) {
-			t.Fatalf("window handle target = %d, want %d", handle, ncryptHandle(201))
-		}
 		if property != winHelloNCryptWindowHandleProperty {
 			t.Fatalf("property = %q, want %q", property, winHelloNCryptWindowHandleProperty)
 		}
 		if value != uintptr(123) {
 			t.Fatalf("value = %d, want %d", value, uintptr(123))
 		}
-		operations = append(operations, "set-provider-hwnd")
+		switch handle {
+		case ncryptHandle(201):
+			operations = append(operations, "set-provider-hwnd")
+		case ncryptHandle(202):
+			operations = append(operations, "set-key-hwnd")
+		default:
+			t.Fatalf("window handle target = %d, want provider or key", handle)
+		}
 		return nil
 	}
 	winHelloNCryptOpenKeyFunc = func(provider ncryptHandle, keyName string, legacyKeySpec uint32, flags uint32) (ncryptHandle, error) {
@@ -60,8 +65,8 @@ func TestWinHelloWrapKeyUsesPKCS1(t *testing.T) {
 		if flags != winHelloNCryptPadPKCS1Flag {
 			t.Fatalf("flags = %#x, want %#x", flags, winHelloNCryptPadPKCS1Flag)
 		}
-		if !bytes.Equal(plaintext, []byte("cek-data")) {
-			t.Fatalf("plaintext = %q, want %q", plaintext, []byte("cek-data"))
+		if !bytes.Equal(plaintext, cek) {
+			t.Fatalf("plaintext = %x, want %x", plaintext, cek)
 		}
 		operations = append(operations, "encrypt")
 		return []byte("wrapped-cek"), nil
@@ -79,7 +84,7 @@ func TestWinHelloWrapKeyUsesPKCS1(t *testing.T) {
 	}
 
 	passportKey := &winHelloPassportKey{keyName: "passport-key-name", hwnd: 123}
-	wrapped, err := passportKey.WrapKey([]byte("cek-data"))
+	wrapped, err := passportKey.WrapKey(cek)
 	if err != nil {
 		t.Fatalf("WrapKey() failed: %v", err)
 	}
@@ -87,9 +92,38 @@ func TestWinHelloWrapKeyUsesPKCS1(t *testing.T) {
 		t.Fatalf("wrapped = %q, want %q", wrapped, []byte("wrapped-cek"))
 	}
 
-	wantOperations := []string{"open-provider", "set-provider-hwnd", "open-key", "encrypt", "free-key", "free-provider"}
+	wantOperations := []string{"open-provider", "set-provider-hwnd", "open-key", "set-key-hwnd", "encrypt", "free-key", "free-provider"}
 	if !equalStringSlices(operations, wantOperations) {
 		t.Fatalf("operations = %v, want %v", operations, wantOperations)
+	}
+}
+
+func TestWinHelloWrapKeyRejectsInvalidCEKSize(t *testing.T) {
+	restore := stubWinHelloWrapNCryptHooks(t)
+	defer restore()
+
+	winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
+		t.Fatal("WrapKey should reject invalid CEK size before opening the provider")
+		return 0, errors.New("unexpected provider open")
+	}
+
+	for _, testCase := range []struct {
+		name string
+		size int
+	}{
+		{name: "31-bytes", size: winHelloCEKSize - 1},
+		{name: "33-bytes", size: winHelloCEKSize + 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			passportKey := &winHelloPassportKey{keyName: "passport-key-name"}
+			_, err := passportKey.WrapKey(bytes.Repeat([]byte{0x7a}, testCase.size))
+			if !errors.Is(err, errWinHelloInvalidCEKSize) {
+				t.Fatalf("error = %v, want %v", err, errWinHelloInvalidCEKSize)
+			}
+			if !strings.Contains(err.Error(), "got ") {
+				t.Fatalf("error = %v, want size detail", err)
+			}
+		})
 	}
 }
 
@@ -98,6 +132,7 @@ func TestWinHelloWrapUnwrapKeyPreparesPromptAndUsesPKCS1(t *testing.T) {
 	defer restore()
 
 	var operations []string
+	cek := newWinHelloWrapTestCEK()
 
 	winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
 		operations = append(operations, "open-provider")
@@ -167,7 +202,7 @@ func TestWinHelloWrapUnwrapKeyPreparesPromptAndUsesPKCS1(t *testing.T) {
 			t.Fatalf("flags = %#x, want %#x", flags, winHelloNCryptPadPKCS1Flag)
 		}
 		operations = append(operations, "decrypt")
-		return []byte("cek-data"), nil
+		return cek, nil
 	}
 	winHelloNCryptFreeObjectFunc = func(handle ncryptHandle) error {
 		switch handle {
@@ -186,8 +221,8 @@ func TestWinHelloWrapUnwrapKeyPreparesPromptAndUsesPKCS1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnwrapKey() failed: %v", err)
 	}
-	if !bytes.Equal(cek, []byte("cek-data")) {
-		t.Fatalf("cek = %q, want %q", cek, []byte("cek-data"))
+	if !bytes.Equal(cek, newWinHelloWrapTestCEK()) {
+		t.Fatalf("cek = %x, want %x", cek, newWinHelloWrapTestCEK())
 	}
 
 	wantOperations := []string{"open-provider", "set-provider-hwnd", "open-key", "set-key-hwnd", "set-use-context", "set-pin-cache", "decrypt", "free-key", "free-provider"}
@@ -196,11 +231,59 @@ func TestWinHelloWrapUnwrapKeyPreparesPromptAndUsesPKCS1(t *testing.T) {
 	}
 }
 
+func TestWinHelloWrapUnwrapKeyUsesDefaultContext(t *testing.T) {
+	restore := stubWinHelloWrapNCryptHooks(t)
+	defer restore()
+
+	cek := newWinHelloWrapTestCEK()
+
+	winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
+		return ncryptHandle(351), nil
+	}
+	winHelloNCryptOpenKeyFunc = func(_ ncryptHandle, _ string, _ uint32, _ uint32) (ncryptHandle, error) {
+		return ncryptHandle(352), nil
+	}
+	winHelloNCryptSetStringPropertyFunc = func(handle ncryptHandle, property string, value string) error {
+		if handle != ncryptHandle(352) || property != winHelloNCryptUseContextProperty {
+			t.Fatalf("unexpected string property call: handle=%d property=%q", handle, property)
+		}
+		if value != winHelloPassportDefaultUnwrapContext {
+			t.Fatalf("value = %q, want %q", value, winHelloPassportDefaultUnwrapContext)
+		}
+		return nil
+	}
+	winHelloNCryptSetUint32PropertyFunc = func(handle ncryptHandle, property string, value uint32) error {
+		if handle != ncryptHandle(352) || property != winHelloNCryptPinCacheIsGestureRequiredProperty || value != 1 {
+			t.Fatalf("unexpected uint32 property call: handle=%d property=%q value=%d", handle, property, value)
+		}
+		return nil
+	}
+	winHelloNCryptDecryptFunc = func(handle ncryptHandle, ciphertext []byte, paddingInfo unsafe.Pointer, flags uint32) ([]byte, error) {
+		if handle != ncryptHandle(352) || !bytes.Equal(ciphertext, []byte("wrapped-cek")) || paddingInfo != nil || flags != winHelloNCryptPadPKCS1Flag {
+			t.Fatalf("unexpected decrypt call: handle=%d ciphertext=%x padding=%v flags=%#x", handle, ciphertext, paddingInfo, flags)
+		}
+		return cek, nil
+	}
+	winHelloNCryptFreeObjectFunc = func(_ ncryptHandle) error {
+		return nil
+	}
+
+	passportKey := &winHelloPassportKey{keyName: "passport-key-name"}
+	unwrapped, err := passportKey.UnwrapKey([]byte("wrapped-cek"), "")
+	if err != nil {
+		t.Fatalf("UnwrapKey() failed: %v", err)
+	}
+	if !bytes.Equal(unwrapped, cek) {
+		t.Fatalf("cek = %x, want %x", unwrapped, cek)
+	}
+}
+
 func TestWinHelloWrapUnwrapKeyIgnoresWindowHandleError(t *testing.T) {
 	restore := stubWinHelloWrapNCryptHooks(t)
 	defer restore()
 
 	var operations []string
+	cek := newWinHelloWrapTestCEK()
 
 	winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
 		return ncryptHandle(401), nil
@@ -238,7 +321,7 @@ func TestWinHelloWrapUnwrapKeyIgnoresWindowHandleError(t *testing.T) {
 			t.Fatalf("unexpected decrypt call: handle=%d padding=%v flags=%#x", handle, paddingInfo, flags)
 		}
 		operations = append(operations, "decrypt")
-		return []byte("cek-data"), nil
+		return cek, nil
 	}
 	winHelloNCryptFreeObjectFunc = func(_ ncryptHandle) error {
 		return nil
@@ -249,13 +332,56 @@ func TestWinHelloWrapUnwrapKeyIgnoresWindowHandleError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnwrapKey() failed: %v", err)
 	}
-	if !bytes.Equal(cek, []byte("cek-data")) {
-		t.Fatalf("cek = %q, want %q", cek, []byte("cek-data"))
+	if !bytes.Equal(cek, newWinHelloWrapTestCEK()) {
+		t.Fatalf("cek = %x, want %x", cek, newWinHelloWrapTestCEK())
 	}
 
 	wantOperations := []string{"set-provider-hwnd", "set-key-hwnd", "set-use-context", "set-pin-cache", "decrypt"}
 	if !equalStringSlices(operations, wantOperations) {
 		t.Fatalf("operations = %v, want %v", operations, wantOperations)
+	}
+}
+
+func TestWinHelloWrapUnwrapKeyRejectsInvalidCEKSize(t *testing.T) {
+	restore := stubWinHelloWrapNCryptHooks(t)
+	defer restore()
+
+	for _, testCase := range []struct {
+		name string
+		size int
+	}{
+		{name: "31-bytes", size: winHelloCEKSize - 1},
+		{name: "33-bytes", size: winHelloCEKSize + 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
+				return ncryptHandle(451), nil
+			}
+			winHelloNCryptOpenKeyFunc = func(_ ncryptHandle, _ string, _ uint32, _ uint32) (ncryptHandle, error) {
+				return ncryptHandle(452), nil
+			}
+			winHelloNCryptSetStringPropertyFunc = func(_ ncryptHandle, _ string, _ string) error {
+				return nil
+			}
+			winHelloNCryptSetUint32PropertyFunc = func(_ ncryptHandle, _ string, _ uint32) error {
+				return nil
+			}
+			winHelloNCryptDecryptFunc = func(_ ncryptHandle, _ []byte, _ unsafe.Pointer, _ uint32) ([]byte, error) {
+				return bytes.Repeat([]byte{0x2b}, testCase.size), nil
+			}
+			winHelloNCryptFreeObjectFunc = func(_ ncryptHandle) error {
+				return nil
+			}
+
+			passportKey := &winHelloPassportKey{keyName: "passport-key-name"}
+			_, err := passportKey.UnwrapKey([]byte("wrapped-cek"), "Prompt text")
+			if !errors.Is(err, errWinHelloInvalidCEKSize) {
+				t.Fatalf("error = %v, want %v", err, errWinHelloInvalidCEKSize)
+			}
+			if !strings.Contains(err.Error(), "after unwrap") {
+				t.Fatalf("error = %v, want after unwrap context", err)
+			}
+		})
 	}
 }
 
@@ -305,6 +431,180 @@ func TestWinHelloWrapUnwrapKeyPropagatesUseContextError(t *testing.T) {
 	}
 }
 
+func TestWinHelloWrapKeyPropagatesEncryptErrorAndFreesHandles(t *testing.T) {
+	restore := stubWinHelloWrapNCryptHooks(t)
+	defer restore()
+
+	wantErr := errors.New("encrypt rejected")
+	var freed []ncryptHandle
+
+	winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
+		return ncryptHandle(601), nil
+	}
+	winHelloNCryptOpenKeyFunc = func(_ ncryptHandle, _ string, _ uint32, _ uint32) (ncryptHandle, error) {
+		return ncryptHandle(602), nil
+	}
+	winHelloNCryptSetHandlePropertyFunc = func(_ ncryptHandle, _ string, _ uintptr) error {
+		return nil
+	}
+	winHelloNCryptEncryptFunc = func(_ ncryptHandle, _ []byte, _ unsafe.Pointer, _ uint32) ([]byte, error) {
+		return nil, wantErr
+	}
+	winHelloNCryptFreeObjectFunc = func(handle ncryptHandle) error {
+		freed = append(freed, handle)
+		return nil
+	}
+
+	passportKey := &winHelloPassportKey{keyName: "passport-key-name", hwnd: 1}
+	_, err := passportKey.WrapKey(newWinHelloWrapTestCEK())
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if !strings.Contains(err.Error(), "wrap CEK with Passport key") {
+		t.Fatalf("error = %v, want wrap CEK context", err)
+	}
+	if !equalHandleSlices(freed, []ncryptHandle{ncryptHandle(602), ncryptHandle(601)}) {
+		t.Fatalf("freed handles = %v, want %v", freed, []ncryptHandle{ncryptHandle(602), ncryptHandle(601)})
+	}
+}
+
+func TestWinHelloWrapUnwrapKeyPropagatesDecryptErrorAndFreesHandles(t *testing.T) {
+	restore := stubWinHelloWrapNCryptHooks(t)
+	defer restore()
+
+	wantErr := errors.New("decrypt rejected")
+	var freed []ncryptHandle
+
+	winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
+		return ncryptHandle(701), nil
+	}
+	winHelloNCryptOpenKeyFunc = func(_ ncryptHandle, _ string, _ uint32, _ uint32) (ncryptHandle, error) {
+		return ncryptHandle(702), nil
+	}
+	winHelloNCryptSetHandlePropertyFunc = func(_ ncryptHandle, _ string, _ uintptr) error {
+		return nil
+	}
+	winHelloNCryptSetStringPropertyFunc = func(_ ncryptHandle, _ string, _ string) error {
+		return nil
+	}
+	winHelloNCryptSetUint32PropertyFunc = func(_ ncryptHandle, _ string, _ uint32) error {
+		return nil
+	}
+	winHelloNCryptDecryptFunc = func(_ ncryptHandle, _ []byte, _ unsafe.Pointer, _ uint32) ([]byte, error) {
+		return nil, wantErr
+	}
+	winHelloNCryptFreeObjectFunc = func(handle ncryptHandle) error {
+		freed = append(freed, handle)
+		return nil
+	}
+
+	passportKey := &winHelloPassportKey{keyName: "passport-key-name", hwnd: 1}
+	_, err := passportKey.UnwrapKey([]byte("wrapped-cek"), "Prompt text")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if !strings.Contains(err.Error(), "unwrap CEK with Passport key") {
+		t.Fatalf("error = %v, want unwrap CEK context", err)
+	}
+	if !equalHandleSlices(freed, []ncryptHandle{ncryptHandle(702), ncryptHandle(701)}) {
+		t.Fatalf("freed handles = %v, want %v", freed, []ncryptHandle{ncryptHandle(702), ncryptHandle(701)})
+	}
+}
+
+func TestWinHelloWithOperationKeyPropagatesOpenProviderError(t *testing.T) {
+	restore := stubWinHelloWrapNCryptHooks(t)
+	defer restore()
+
+	wantErr := errors.New("provider open rejected")
+	runCalled := false
+
+	winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
+		return 0, wantErr
+	}
+
+	passportKey := &winHelloPassportKey{keyName: "passport-key-name"}
+	err := passportKey.withOperationKey(func(_ ncryptHandle) error {
+		runCalled = true
+		return nil
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if runCalled {
+		t.Fatal("run callback was called after provider open failure")
+	}
+	if !strings.Contains(err.Error(), "open Passport provider") {
+		t.Fatalf("error = %v, want provider-open context", err)
+	}
+}
+
+func TestWinHelloWithOperationKeyPropagatesOpenKeyError(t *testing.T) {
+	restore := stubWinHelloWrapNCryptHooks(t)
+	defer restore()
+
+	wantErr := errors.New("key open rejected")
+	var freed []ncryptHandle
+
+	winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
+		return ncryptHandle(801), nil
+	}
+	winHelloNCryptOpenKeyFunc = func(_ ncryptHandle, _ string, _ uint32, _ uint32) (ncryptHandle, error) {
+		return 0, wantErr
+	}
+	winHelloNCryptFreeObjectFunc = func(handle ncryptHandle) error {
+		freed = append(freed, handle)
+		return nil
+	}
+
+	passportKey := &winHelloPassportKey{keyName: "passport-key-name"}
+	err := passportKey.withOperationKey(func(_ ncryptHandle) error {
+		t.Fatal("run callback should not be called after key open failure")
+		return nil
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if !strings.Contains(err.Error(), "open Passport key") {
+		t.Fatalf("error = %v, want key-open context", err)
+	}
+	if !equalHandleSlices(freed, []ncryptHandle{ncryptHandle(801)}) {
+		t.Fatalf("freed handles = %v, want %v", freed, []ncryptHandle{ncryptHandle(801)})
+	}
+}
+
+func TestWinHelloWithOperationKeyMapsMissingPassportKey(t *testing.T) {
+	restore := stubWinHelloWrapNCryptHooks(t)
+	defer restore()
+
+	var freed []ncryptHandle
+
+	winHelloNCryptOpenStorageProviderFunc = func(_ string) (ncryptHandle, error) {
+		return ncryptHandle(811), nil
+	}
+	winHelloNCryptOpenKeyFunc = func(_ ncryptHandle, _ string, _ uint32, _ uint32) (ncryptHandle, error) {
+		return 0, errWinHelloNCryptNotFound
+	}
+	winHelloNCryptFreeObjectFunc = func(handle ncryptHandle) error {
+		freed = append(freed, handle)
+		return nil
+	}
+
+	passportKey := &winHelloPassportKey{keyName: "passport-key-name"}
+	err := passportKey.withOperationKey(func(_ ncryptHandle) error {
+		t.Fatal("run callback should not be called when Passport key is missing")
+		return nil
+	})
+	if !errors.Is(err, errWinHelloPassportKeyNotFound) {
+		t.Fatalf("error = %v, want %v", err, errWinHelloPassportKeyNotFound)
+	}
+	if errors.Is(err, ErrKeyNotFound) {
+		t.Fatalf("error %v unexpectedly classified as ErrKeyNotFound", err)
+	}
+	if !equalHandleSlices(freed, []ncryptHandle{ncryptHandle(811)}) {
+		t.Fatalf("freed handles = %v, want %v", freed, []ncryptHandle{ncryptHandle(811)})
+	}
+}
+
 func TestWinHelloWrapRoundTrip(t *testing.T) {
 	requireWinHelloPassportIntegration(t)
 
@@ -319,7 +619,7 @@ func TestWinHelloWrapRoundTrip(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if err := passportKey.Close(); err != nil {
-			t.Fatalf("Close() failed: %v", err)
+			t.Errorf("Close() failed: %v", err)
 		}
 	})
 
@@ -338,7 +638,7 @@ func TestWinHelloWrapRoundTrip(t *testing.T) {
 		t.Fatal("wrapped CEK = empty, want ciphertext")
 	}
 
-	unwrapped, err := passportKey.UnwrapKey(wrapped, "Unlock keyring step 9 test key")
+	unwrapped, err := passportKey.UnwrapKey(wrapped, "Unlock keyring CEK wrapping test key")
 	if err != nil {
 		t.Fatalf("UnwrapKey() failed: %v", err)
 	}
@@ -372,4 +672,26 @@ func equalStringSlices(got []string, want []string) bool {
 	}
 
 	return true
+}
+
+func equalHandleSlices(got []ncryptHandle, want []ncryptHandle) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func newWinHelloWrapTestCEK() []byte {
+	return []byte{
+		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+		0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+		0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+		0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+	}
 }

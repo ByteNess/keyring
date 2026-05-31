@@ -13,6 +13,8 @@ const (
 	winHelloPassportCreateContext = "Create keyring winhello key"
 )
 
+var errWinHelloPassportKeyNotFound = errors.New("winhello Passport key is missing or no longer usable")
+
 // winHelloPassportKey keeps only stable metadata needed to reopen the
 // Passport-backed key on demand. Each cryptographic operation should open its
 // own provider/key handles rather than sharing NCrypt handles across calls.
@@ -46,12 +48,12 @@ func openWinHelloPassportKey(logicalName string, hwnd uintptr) (*winHelloPasspor
 	keyHandle, err := winHelloNCryptOpenKeyFunc(provider, keyName, 0, 0)
 	if err != nil {
 		if isWinHelloNCryptKeyNotFound(err) {
-			return nil, ErrKeyNotFound
+			return nil, errWinHelloPassportKeyNotFound
 		}
-		return nil, fmt.Errorf("open Passport key %q: %w", keyName, err)
+		return nil, fmt.Errorf("open Passport key: %w", err)
 	}
 	if err := winHelloNCryptFreeObjectFunc(keyHandle); err != nil {
-		return nil, fmt.Errorf("free Passport key %q: %w", keyName, err)
+		return nil, fmt.Errorf("free Passport key: %w", err)
 	}
 
 	return &winHelloPassportKey{
@@ -65,7 +67,7 @@ func ensureWinHelloPassportKey(logicalName string, hwnd uintptr) (*winHelloPassp
 	if err == nil {
 		return passportKey, nil
 	}
-	if !errors.Is(err, ErrKeyNotFound) {
+	if !errors.Is(err, errWinHelloPassportKeyNotFound) {
 		return nil, err
 	}
 
@@ -80,25 +82,25 @@ func ensureWinHelloPassportKey(logicalName string, hwnd uintptr) (*winHelloPassp
 	createdKey, err := winHelloNCryptCreatePersistedKeyFunc(provider, winHelloNCryptRSAAlgorithm, keyName, 0, 0)
 	if err != nil {
 		_ = winHelloNCryptFreeObjectFunc(provider)
-		return nil, fmt.Errorf("create Passport key %q: %w", keyName, err)
+		return nil, fmt.Errorf("create Passport key: %w", err)
 	}
 
 	if err := winHelloInitializePassportKey(createdKey, hwnd); err != nil {
 		_ = winHelloNCryptFreeObjectFunc(createdKey)
 		_ = winHelloNCryptFreeObjectFunc(provider)
-		return nil, fmt.Errorf("initialize Passport key %q: %w", keyName, err)
+		return nil, fmt.Errorf("initialize Passport key: %w", err)
 	}
 	if err := winHelloNCryptFinalizeKeyFunc(createdKey, 0); err != nil {
 		_ = winHelloNCryptFreeObjectFunc(createdKey)
 		_ = winHelloNCryptFreeObjectFunc(provider)
-		return nil, fmt.Errorf("finalize Passport key %q: %w", keyName, err)
+		return nil, fmt.Errorf("finalize Passport key: %w", err)
 	}
 	if err := winHelloNCryptFreeObjectFunc(createdKey); err != nil {
 		_ = winHelloNCryptFreeObjectFunc(provider)
-		return nil, fmt.Errorf("free Passport key %q after finalize: %w", keyName, err)
+		return nil, fmt.Errorf("free Passport key after finalize: %w", err)
 	}
 	if err := winHelloNCryptFreeObjectFunc(provider); err != nil {
-		return nil, fmt.Errorf("free Passport provider after create %q: %w", keyName, err)
+		return nil, fmt.Errorf("free Passport provider after create: %w", err)
 	}
 
 	return &winHelloPassportKey{
@@ -108,9 +110,9 @@ func ensureWinHelloPassportKey(logicalName string, hwnd uintptr) (*winHelloPassp
 }
 
 func (key *winHelloPassportKey) Close() error {
-	if key == nil {
-		return nil
-	}
+	// This object is only a descriptor for the persisted Passport key. Each
+	// operation reopens fresh NCrypt handles, so Close has no resource ownership
+	// to release and intentionally does not make the descriptor unusable.
 	return nil
 }
 

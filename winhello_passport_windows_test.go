@@ -43,7 +43,7 @@ func TestWinHelloPassportCloseIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestWinHelloPassportOpenMissingKeyReturnsNotFound(t *testing.T) {
+func TestWinHelloPassportOpenMissingKeyReturnsPassportKeyNotFound(t *testing.T) {
 	restore := stubWinHelloPassportNCryptHooks(t)
 	defer restore()
 
@@ -73,8 +73,11 @@ func TestWinHelloPassportOpenMissingKeyReturnsNotFound(t *testing.T) {
 	}
 
 	passportKey, err := openWinHelloPassportKey("missing-key", 0)
-	if !errors.Is(err, ErrKeyNotFound) {
-		t.Fatalf("error = %v, want %v", err, ErrKeyNotFound)
+	if !errors.Is(err, errWinHelloPassportKeyNotFound) {
+		t.Fatalf("error = %v, want %v", err, errWinHelloPassportKeyNotFound)
+	}
+	if errors.Is(err, ErrKeyNotFound) {
+		t.Fatalf("error %v unexpectedly classified as ErrKeyNotFound", err)
 	}
 	if passportKey != nil {
 		t.Fatalf("passport key = %#v, want nil", passportKey)
@@ -615,21 +618,24 @@ func TestWinHelloPassportCreateAndReopen(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if err := reopenedKey.Close(); err != nil {
-			t.Fatalf("Close() failed: %v", err)
+			t.Errorf("Close() failed: %v", err)
 		}
 	})
 }
 
-func TestWinHelloPassportCreateMissingKeyIsNotFound(t *testing.T) {
+func TestWinHelloPassportCreateMissingKeyReturnsPassportKeyNotFound(t *testing.T) {
 	requireWinHelloPassportIntegration(t)
 
 	logicalName := newWinHelloPassportTestLogicalName("missing")
 	passportKey, err := openWinHelloPassportKey(logicalName, 0)
-	if !errors.Is(err, ErrKeyNotFound) {
+	if !errors.Is(err, errWinHelloPassportKeyNotFound) {
 		if passportKey != nil {
 			_ = passportKey.Close()
 		}
-		t.Fatalf("error = %v, want %v", err, ErrKeyNotFound)
+		t.Fatalf("error = %v, want %v", err, errWinHelloPassportKeyNotFound)
+	}
+	if errors.Is(err, ErrKeyNotFound) {
+		t.Fatalf("error %v unexpectedly classified as ErrKeyNotFound", err)
 	}
 }
 

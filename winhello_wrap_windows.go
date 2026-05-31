@@ -13,19 +13,28 @@ const winHelloPassportDefaultUnwrapContext = "Unlock keyring secret"
 var (
 	errWinHelloPassportKeyRequired     = errors.New("winhello passport key is required")
 	errWinHelloPassportKeyNameRequired = errors.New("winhello passport key name is required")
+	errWinHelloInvalidCEKSize          = errors.New("winhello CEK must be 32 bytes")
 
 	winHelloNCryptEncryptFunc = winHelloNCryptEncrypt
 	winHelloNCryptDecryptFunc = winHelloNCryptDecrypt
 )
 
 func (key *winHelloPassportKey) WrapKey(cek []byte) ([]byte, error) {
+	if len(cek) != winHelloCEKSize {
+		return nil, fmt.Errorf("%w: got %d bytes", errWinHelloInvalidCEKSize, len(cek))
+	}
+
 	var wrapped []byte
 
 	err := key.withOperationKey(func(handle ncryptHandle) error {
+		// Public-key encrypt should not prompt, but keep prompt ownership aligned
+		// with the active window if the provider ever surfaces UI during use.
+		_ = winHelloSetWindowHandleIfPresent(handle, key.hwnd)
+
 		var err error
 		wrapped, err = winHelloNCryptEncryptFunc(handle, cek, nil, winHelloNCryptPadPKCS1Flag)
 		if err != nil {
-			return fmt.Errorf("wrap CEK with Passport key %q: %w", key.keyName, err)
+			return fmt.Errorf("wrap CEK with Passport key: %w", err)
 		}
 
 		return nil
@@ -42,13 +51,16 @@ func (key *winHelloPassportKey) UnwrapKey(wrapped []byte, context string) ([]byt
 
 	err := key.withOperationKey(func(handle ncryptHandle) error {
 		if err := winHelloPreparePassportUnwrap(handle, key.hwnd, context); err != nil {
-			return fmt.Errorf("prepare Passport key %q for unwrap: %w", key.keyName, err)
+			return fmt.Errorf("prepare Passport key for unwrap: %w", err)
 		}
 
 		var err error
 		cek, err = winHelloNCryptDecryptFunc(handle, wrapped, nil, winHelloNCryptPadPKCS1Flag)
 		if err != nil {
-			return fmt.Errorf("unwrap CEK with Passport key %q: %w", key.keyName, err)
+			return fmt.Errorf("unwrap CEK with Passport key: %w", err)
+		}
+		if len(cek) != winHelloCEKSize {
+			return fmt.Errorf("%w after unwrap: got %d bytes", errWinHelloInvalidCEKSize, len(cek))
 		}
 
 		return nil
@@ -61,7 +73,9 @@ func (key *winHelloPassportKey) UnwrapKey(wrapped []byte, context string) ([]byt
 }
 
 // withOperationKey reopens the persisted Passport key for each cryptographic
-// operation so the wrapper never shares NCrypt handles across calls.
+// operation so the wrapper never shares NCrypt handles across calls. Handle
+// cleanup is best-effort because this descriptor is stateless and the caller's
+// actionable failure is the cryptographic operation itself.
 func (key *winHelloPassportKey) withOperationKey(run func(handle ncryptHandle) error) error {
 	if key == nil {
 		return errWinHelloPassportKeyRequired
@@ -74,31 +88,23 @@ func (key *winHelloPassportKey) withOperationKey(run func(handle ncryptHandle) e
 	if err != nil {
 		return fmt.Errorf("open Passport provider: %w", err)
 	}
+	defer func() {
+		_ = winHelloNCryptFreeObjectFunc(provider)
+	}()
 	_ = winHelloSetWindowHandleIfPresent(provider, key.hwnd)
 
 	openedKey, err := winHelloNCryptOpenKeyFunc(provider, key.keyName, 0, 0)
 	if err != nil {
-		_ = winHelloNCryptFreeObjectFunc(provider)
 		if isWinHelloNCryptKeyNotFound(err) {
-			return ErrKeyNotFound
+			return errWinHelloPassportKeyNotFound
 		}
-		return fmt.Errorf("open Passport key %q: %w", key.keyName, err)
+		return fmt.Errorf("open Passport key: %w", err)
 	}
-
-	if err := run(openedKey); err != nil {
+	defer func() {
 		_ = winHelloNCryptFreeObjectFunc(openedKey)
-		_ = winHelloNCryptFreeObjectFunc(provider)
-		return err
-	}
-	if err := winHelloNCryptFreeObjectFunc(openedKey); err != nil {
-		_ = winHelloNCryptFreeObjectFunc(provider)
-		return fmt.Errorf("free Passport key %q: %w", key.keyName, err)
-	}
-	if err := winHelloNCryptFreeObjectFunc(provider); err != nil {
-		return fmt.Errorf("free Passport provider for %q: %w", key.keyName, err)
-	}
+	}()
 
-	return nil
+	return run(openedKey)
 }
 
 // Passport private-key unwraps should request interactive approval rather than
