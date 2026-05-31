@@ -1,4 +1,4 @@
-package keyring
+package winhello
 
 import (
 	"encoding/json"

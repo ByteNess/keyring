@@ -1,16 +1,19 @@
 //go:build windows
 // +build windows
 
-package keyring
+package winhello
 
 import (
 	"bytes"
 	"errors"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/danieljoos/wincred"
 )
+
+const errElementNotFound = syscall.Errno(1168)
 
 const winHelloWinCredPrefix = "keyring-winhello"
 
@@ -104,7 +107,7 @@ func (a *winHelloListEntryAdapter) TargetName() string {
 func (s *winHelloWinCredStore) Read(key string) ([]byte, error) {
 	cred, err := winHelloGetGenericCredentialFunc(s.credentialName(key))
 	if err != nil {
-		if errors.Is(err, elementNotFoundError) {
+		if errors.Is(err, errElementNotFound) {
 			return nil, ErrKeyNotFound
 		}
 
@@ -123,7 +126,7 @@ func (s *winHelloWinCredStore) Write(key string, data []byte) error {
 func (s *winHelloWinCredStore) Delete(key string) error {
 	cred, err := winHelloGetGenericCredentialFunc(s.credentialName(key))
 	if err != nil {
-		if errors.Is(err, elementNotFoundError) {
+		if errors.Is(err, errElementNotFound) {
 			return ErrKeyNotFound
 		}
 
@@ -132,7 +135,7 @@ func (s *winHelloWinCredStore) Delete(key string) error {
 
 	// Prevent raw error from Delete() from leaking out of the store in case of a race condition where the credential is deleted between our Get and Delete calls
 	if err := cred.Delete(); err != nil {
-		if errors.Is(err, elementNotFoundError) {
+		if errors.Is(err, errElementNotFound) {
 			return ErrKeyNotFound
 		}
 

@@ -1,7 +1,7 @@
 //go:build windows
 // +build windows
 
-package keyring
+package winhello
 
 import (
 	"bytes"
@@ -64,7 +64,7 @@ func TestWinHelloWinCredStoreReadMissingReturnsKeyNotFound(t *testing.T) {
 	defer restore()
 
 	winHelloGetGenericCredentialFunc = func(_ string) (winHelloWinCredCredential, error) {
-		return nil, elementNotFoundError
+		return nil, errElementNotFound
 	}
 
 	store := newWinHelloWinCredStore("read-missing")
@@ -79,7 +79,7 @@ func TestWinHelloWinCredStoreDeleteMissingReturnsKeyNotFound(t *testing.T) {
 	defer restore()
 
 	winHelloGetGenericCredentialFunc = func(_ string) (winHelloWinCredCredential, error) {
-		return nil, elementNotFoundError
+		return nil, errElementNotFound
 	}
 
 	store := newWinHelloWinCredStore("delete-missing")
@@ -94,7 +94,7 @@ func TestWinHelloWinCredStoreDeleteMapsDeleteRaceToKeyNotFound(t *testing.T) {
 	defer restore()
 
 	winHelloGetGenericCredentialFunc = func(_ string) (winHelloWinCredCredential, error) {
-		return &fakeWinHelloWinCredCredential{deleteErr: elementNotFoundError}, nil
+		return &fakeWinHelloWinCredCredential{deleteErr: errElementNotFound}, nil
 	}
 
 	store := newWinHelloWinCredStore("delete-race")

@@ -1,7 +1,7 @@
 //go:build windows
 // +build windows
 
-package keyring
+package winhello
 
 import (
 	"bytes"
@@ -101,13 +101,13 @@ func TestNewWinHelloKeyringDefaultsServiceName(t *testing.T) {
 	restore := stubWinHelloKeyringHooks(t)
 	defer restore()
 
-	winHelloPassportLogicalNameFunc = func() string {
+	passportLogicalNameFunc = func() string {
 		return "keyring-winhello-test-backend-defaults"
 	}
 
-	ring, err := newWinHelloKeyring("")
+	ring, err := New("")
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
 
 	if got, want := ring.serviceName, "default"; got != want {
@@ -134,27 +134,28 @@ func TestWinHelloKeyringSetGetKeysAndRemoveRoundTrip(t *testing.T) {
 	winHelloParentHWNDFunc = func() uintptr {
 		return 1234
 	}
-	ring, err := newWinHelloKeyring("svc")
+	ring, err := New("svc")
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
 
 	wrapper := &fakeWinHelloBackendWrapper{}
 	ring.wrapper = wrapper
 
-	item := Item{Key: "item", Data: []byte("super-secret")}
-	if err := ring.Set(item); err != nil {
+	key := "item"
+	data := []byte("super-secret")
+	if err := ring.Set(key, data); err != nil {
 		t.Fatalf("Set() failed: %v", err)
 	}
 	if wrapper.wrapCalls != 1 {
 		t.Fatalf("wrapCalls = %d, want 1", wrapper.wrapCalls)
 	}
 
-	rawEnvelope, err := ring.store.Read(item.Key)
+	rawEnvelope, err := ring.store.Read(key)
 	if err != nil {
 		t.Fatalf("store.Read() failed: %v", err)
 	}
-	if bytes.Contains(rawEnvelope, item.Data) {
+	if bytes.Contains(rawEnvelope, data) {
 		t.Fatal("stored envelope contains plaintext")
 	}
 
@@ -165,27 +166,24 @@ func TestWinHelloKeyringSetGetKeysAndRemoveRoundTrip(t *testing.T) {
 	if envelope.KeyName != ring.keyName {
 		t.Fatalf("envelope key name = %q, want %q", envelope.KeyName, ring.keyName)
 	}
-	if !bytes.Equal(envelope.AAD, winHelloAAD(ring.serviceName, item.Key)) {
-		t.Fatalf("envelope AAD = %q, want %q", envelope.AAD, winHelloAAD(ring.serviceName, item.Key))
+	if !bytes.Equal(envelope.AAD, winHelloAAD(ring.serviceName, key)) {
+		t.Fatalf("envelope AAD = %q, want %q", envelope.AAD, winHelloAAD(ring.serviceName, key))
 	}
-	if _, ok := directory.blobs[ring.store.credentialName(item.Key)]; !ok {
+	if _, ok := directory.blobs[ring.store.credentialName(key)]; !ok {
 		t.Fatal("expected envelope to be written to the winhello store")
 	}
 
-	got, err := ring.Get(item.Key)
+	got, err := ring.Get(key)
 	if err != nil {
 		t.Fatalf("Get() failed: %v", err)
 	}
-	if got.Key != item.Key {
-		t.Fatalf("Get() key = %q, want %q", got.Key, item.Key)
-	}
-	if !bytes.Equal(got.Data, item.Data) {
-		t.Fatalf("Get() data = %q, want %q", got.Data, item.Data)
+	if !bytes.Equal(got, data) {
+		t.Fatalf("Get() data = %q, want %q", got, data)
 	}
 	if wrapper.unwrapCalls != 1 {
 		t.Fatalf("unwrapCalls = %d, want 1", wrapper.unwrapCalls)
 	}
-	if got, want := wrapper.lastContext, winHelloUseContext(ring.serviceName, item.Key); got != want {
+	if got, want := wrapper.lastContext, winHelloUseContext(ring.serviceName, key); got != want {
 		t.Fatalf("unwrap context = %q, want %q", got, want)
 	}
 
@@ -193,14 +191,14 @@ func TestWinHelloKeyringSetGetKeysAndRemoveRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Keys() failed: %v", err)
 	}
-	if want := []string{item.Key}; !reflect.DeepEqual(keys, want) {
+	if want := []string{key}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("Keys() = %#v, want %#v", keys, want)
 	}
 
-	if err := ring.Remove(item.Key); err != nil {
+	if err := ring.Remove(key); err != nil {
 		t.Fatalf("Remove() failed: %v", err)
 	}
-	if _, err := ring.store.Read(item.Key); !errors.Is(err, ErrKeyNotFound) {
+	if _, err := ring.store.Read(key); !errors.Is(err, ErrKeyNotFound) {
 		t.Fatalf("store.Read() after Remove() error = %v, want %v", err, ErrKeyNotFound)
 	}
 	if keys, err := ring.Keys(); err != nil {
@@ -218,15 +216,15 @@ func TestWinHelloKeyringSetEnsuresPassportKeyLazily(t *testing.T) {
 	winHelloParentHWNDFunc = func() uintptr {
 		return 1234
 	}
-	ring, err := newWinHelloKeyring("svc")
+	ring, err := New("svc")
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
 
 	wrapper := &fakeWinHelloBackendWrapper{}
 	ensureCalls := 0
 	openCalls := 0
-	winHelloEnsurePassportKeyFunc = func(logicalName string, hwnd uintptr) (winHelloKeyWrapper, error) {
+	ensurePassportKeyFunc = func(logicalName string, hwnd uintptr) (winHelloKeyWrapper, error) {
 		ensureCalls++
 		if logicalName != ring.logicalName {
 			t.Fatalf("logicalName = %q, want %q", logicalName, ring.logicalName)
@@ -236,16 +234,15 @@ func TestWinHelloKeyringSetEnsuresPassportKeyLazily(t *testing.T) {
 		}
 		return wrapper, nil
 	}
-	winHelloOpenPassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
+	openPassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
 		openCalls++
 		return &fakeWinHelloBackendWrapper{}, nil
 	}
 
-	item := Item{Key: "item", Data: []byte("lazy")}
-	if err := ring.Set(item); err != nil {
+	if err := ring.Set("item", []byte("lazy")); err != nil {
 		t.Fatalf("first Set() failed: %v", err)
 	}
-	if err := ring.Set(Item{Key: "item-2", Data: []byte("lazy-two")}); err != nil {
+	if err := ring.Set("item-2", []byte("lazy-two")); err != nil {
 		t.Fatalf("second Set() failed: %v", err)
 	}
 
@@ -265,13 +262,13 @@ func TestWinHelloKeyringGetMissingReturnsKeyNotFoundWithoutOpeningPassportKey(t 
 	defer restore()
 
 	_ = stubWinHelloKeyringStoreHooks(t)
-	ring, err := newWinHelloKeyring("svc")
+	ring, err := New("svc")
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
 
 	openCalls := 0
-	winHelloOpenPassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
+	openPassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
 		openCalls++
 		return &fakeWinHelloBackendWrapper{}, nil
 	}
@@ -294,30 +291,31 @@ func TestWinHelloKeyringGetOpensPassportKeyLazily(t *testing.T) {
 		return 1234
 	}
 
-	encryptingRing, err := newWinHelloKeyring("svc")
+	encryptingRing, err := New("svc")
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
 	encryptingRing.wrapper = &fakeWinHelloBackendWrapper{}
 
-	item := Item{Key: "item", Data: []byte("open-lazily")}
-	if err := encryptingRing.Set(item); err != nil {
+	key := "item"
+	data := []byte("open-lazily")
+	if err := encryptingRing.Set(key, data); err != nil {
 		t.Fatalf("Set() failed: %v", err)
 	}
 
-	readingRing, err := newWinHelloKeyring("svc")
+	readingRing, err := New("svc")
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
 
 	wrapper := &fakeWinHelloBackendWrapper{}
 	ensureCalls := 0
 	openCalls := 0
-	winHelloEnsurePassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
+	ensurePassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
 		ensureCalls++
 		return &fakeWinHelloBackendWrapper{}, nil
 	}
-	winHelloOpenPassportKeyFunc = func(logicalName string, hwnd uintptr) (winHelloKeyWrapper, error) {
+	openPassportKeyFunc = func(logicalName string, hwnd uintptr) (winHelloKeyWrapper, error) {
 		openCalls++
 		if logicalName != readingRing.logicalName {
 			t.Fatalf("logicalName = %q, want %q", logicalName, readingRing.logicalName)
@@ -328,12 +326,12 @@ func TestWinHelloKeyringGetOpensPassportKeyLazily(t *testing.T) {
 		return wrapper, nil
 	}
 
-	got, err := readingRing.Get(item.Key)
+	got, err := readingRing.Get(key)
 	if err != nil {
 		t.Fatalf("Get() failed: %v", err)
 	}
-	if !bytes.Equal(got.Data, item.Data) {
-		t.Fatalf("Get() data = %q, want %q", got.Data, item.Data)
+	if !bytes.Equal(got, data) {
+		t.Fatalf("Get() data = %q, want %q", got, data)
 	}
 	if ensureCalls != 0 {
 		t.Fatalf("ensureCalls = %d, want 0", ensureCalls)
@@ -352,26 +350,26 @@ func TestWinHelloKeyringGetMapsMissingPassportKeyForExistingItem(t *testing.T) {
 
 	_ = stubWinHelloKeyringStoreHooks(t)
 
-	encryptingRing, err := newWinHelloKeyring("svc")
+	encryptingRing, err := New("svc")
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
 	encryptingRing.wrapper = &fakeWinHelloBackendWrapper{}
 
-	item := Item{Key: "item", Data: []byte("passport-missing")}
-	if err := encryptingRing.Set(item); err != nil {
+	key := "item"
+	if err := encryptingRing.Set(key, []byte("passport-missing")); err != nil {
 		t.Fatalf("Set() failed: %v", err)
 	}
 
-	readingRing, err := newWinHelloKeyring("svc")
+	readingRing, err := New("svc")
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
-	winHelloOpenPassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
+	openPassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
 		return nil, errWinHelloPassportKeyNotFound
 	}
 
-	_, err = readingRing.Get(item.Key)
+	_, err = readingRing.Get(key)
 	if !errors.Is(err, errWinHelloPassportKeyNotFound) {
 		t.Fatalf("Get() error = %v, want %v", err, errWinHelloPassportKeyNotFound)
 	}
@@ -383,24 +381,24 @@ func TestWinHelloKeyringGetMapsMissingPassportKeyForExistingItem(t *testing.T) {
 	}
 }
 
-func TestWinHelloKeyringKeysRemoveAndMetadataDoNotTouchPassportKey(t *testing.T) {
+func TestWinHelloKeyringKeysAndRemoveDoNotTouchPassportKey(t *testing.T) {
 	restore := stubWinHelloKeyringHooks(t)
 	defer restore()
 
 	directory := stubWinHelloKeyringStoreHooks(t)
-	ring, err := newWinHelloKeyring("svc")
+	ring, err := New("svc")
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
 
 	directory.blobs[ring.store.credentialName("item")] = []byte("encrypted-envelope")
 	ensureCalls := 0
 	openCalls := 0
-	winHelloEnsurePassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
+	ensurePassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
 		ensureCalls++
 		return &fakeWinHelloBackendWrapper{}, nil
 	}
-	winHelloOpenPassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
+	openPassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
 		openCalls++
 		return &fakeWinHelloBackendWrapper{}, nil
 	}
@@ -413,9 +411,6 @@ func TestWinHelloKeyringKeysRemoveAndMetadataDoNotTouchPassportKey(t *testing.T)
 		t.Fatalf("Keys() = %#v, want %#v", keys, want)
 	}
 
-	if _, err := ring.GetMetadata("item"); !errors.Is(err, ErrMetadataNotSupported) {
-		t.Fatalf("GetMetadata() error = %v, want %v", err, ErrMetadataNotSupported)
-	}
 	if err := ring.Remove("item"); err != nil {
 		t.Fatalf("Remove() failed: %v", err)
 	}
@@ -435,7 +430,7 @@ func TestWinHelloKeyringIntegration(t *testing.T) {
 	defer restore()
 
 	logicalName := newWinHelloPassportTestLogicalName("backend")
-	winHelloPassportLogicalNameFunc = func() string {
+	passportLogicalNameFunc = func() string {
 		return logicalName
 	}
 	t.Cleanup(func() {
@@ -443,9 +438,9 @@ func TestWinHelloKeyringIntegration(t *testing.T) {
 	})
 
 	serviceName := newWinHelloWinCredTestServiceName("backend")
-	ring, err := newWinHelloKeyring(serviceName)
+	ring, err := New(serviceName)
 	if err != nil {
-		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+		t.Fatalf("New() failed: %v", err)
 	}
 
 	key := fmt.Sprintf("item-%d", time.Now().UnixNano())
@@ -454,7 +449,7 @@ func TestWinHelloKeyringIntegration(t *testing.T) {
 		_ = ring.Remove(key)
 	})
 
-	if err := ring.Set(Item{Key: key, Data: plaintext}); err != nil {
+	if err := ring.Set(key, plaintext); err != nil {
 		t.Fatalf("Set() failed: %v", err)
 	}
 
@@ -470,11 +465,8 @@ func TestWinHelloKeyringIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get() failed: %v", err)
 	}
-	if item.Key != key {
-		t.Fatalf("Get() key = %q, want %q", item.Key, key)
-	}
-	if !bytes.Equal(item.Data, plaintext) {
-		t.Fatalf("Get() data = %q, want %q", item.Data, plaintext)
+	if !bytes.Equal(item, plaintext) {
+		t.Fatalf("Get() data = %q, want %q", item, plaintext)
 	}
 
 	keys, err := ring.Keys()
@@ -483,10 +475,6 @@ func TestWinHelloKeyringIntegration(t *testing.T) {
 	}
 	if want := []string{key}; !reflect.DeepEqual(keys, want) {
 		t.Fatalf("Keys() = %#v, want %#v", keys, want)
-	}
-
-	if _, err := ring.GetMetadata(key); !errors.Is(err, ErrMetadataNotSupported) {
-		t.Fatalf("GetMetadata() error = %v, want %v", err, ErrMetadataNotSupported)
 	}
 
 	if err := ring.Remove(key); err != nil {
@@ -508,15 +496,15 @@ func TestWinHelloKeyringIntegration(t *testing.T) {
 func stubWinHelloKeyringHooks(t *testing.T) func() {
 	t.Helper()
 
-	oldLogicalName := winHelloPassportLogicalNameFunc
-	oldEnsure := winHelloEnsurePassportKeyFunc
-	oldOpen := winHelloOpenPassportKeyFunc
+	oldLogicalName := passportLogicalNameFunc
+	oldEnsure := ensurePassportKeyFunc
+	oldOpen := openPassportKeyFunc
 	oldParentHWND := winHelloParentHWNDFunc
 
 	return func() {
-		winHelloPassportLogicalNameFunc = oldLogicalName
-		winHelloEnsurePassportKeyFunc = oldEnsure
-		winHelloOpenPassportKeyFunc = oldOpen
+		passportLogicalNameFunc = oldLogicalName
+		ensurePassportKeyFunc = oldEnsure
+		openPassportKeyFunc = oldOpen
 		winHelloParentHWNDFunc = oldParentHWND
 	}
 }
@@ -532,7 +520,7 @@ func stubWinHelloKeyringStoreHooks(t *testing.T) *fakeWinHelloKeyringCredentialD
 	winHelloGetGenericCredentialFunc = func(target string) (winHelloWinCredCredential, error) {
 		blob, ok := directory.blobs[target]
 		if !ok {
-			return nil, elementNotFoundError
+			return nil, errElementNotFound
 		}
 
 		return &fakeWinHelloKeyringCredential{
