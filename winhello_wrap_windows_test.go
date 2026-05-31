@@ -5,10 +5,19 @@ package keyring
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"unsafe"
+)
+
+const (
+	winHelloSilentUnwrapChildEnv   = "KEYRING_WINHELLO_SILENT_UNWRAP_CHILD"
+	winHelloSilentUnwrapLogicalEnv = "KEYRING_WINHELLO_SILENT_UNWRAP_LOGICAL_NAME"
+	winHelloSilentUnwrapWrappedEnv = "KEYRING_WINHELLO_SILENT_UNWRAP_WRAPPED_CEK"
 )
 
 func TestWinHelloWrapKeyUsesPKCS1(t *testing.T) {
@@ -644,6 +653,85 @@ func TestWinHelloWrapRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(unwrapped, cek) {
 		t.Fatalf("unwrapped CEK mismatch: got %x want %x", unwrapped, cek)
+	}
+}
+
+// This is validating our security guarantee that a silent unwrap attempt (e.g. by malware) fails rather than unexpectedly succeeding!
+func TestWinHelloSilentUnwrapFails(t *testing.T) {
+	requireWinHelloPassportIntegration(t)
+
+	if os.Getenv(winHelloSilentUnwrapChildEnv) == "1" {
+		runWinHelloSilentUnwrapChild(t)
+		return
+	}
+
+	logicalName := newWinHelloPassportTestLogicalName("silent")
+	t.Cleanup(func() {
+		cleanupWinHelloPassportKey(t, logicalName)
+	})
+
+	passportKey, err := ensureWinHelloPassportKey(logicalName, 0)
+	if err != nil {
+		t.Fatalf("ensureWinHelloPassportKey() failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := passportKey.Close(); err != nil {
+			t.Errorf("Close() failed: %v", err)
+		}
+	})
+
+	wrapped, err := passportKey.WrapKey(newWinHelloWrapTestCEK())
+	if err != nil {
+		t.Fatalf("WrapKey() failed: %v", err)
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestWinHelloSilentUnwrapFails$", "-test.v")
+	cmd.Env = append(
+		os.Environ(),
+		winHelloSilentUnwrapChildEnv+"=1",
+		winHelloSilentUnwrapLogicalEnv+"="+logicalName,
+		winHelloSilentUnwrapWrappedEnv+"="+base64.StdEncoding.EncodeToString(wrapped),
+	)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("silent unwrap child failed: %v\n%s", err, output)
+	}
+}
+
+func runWinHelloSilentUnwrapChild(t *testing.T) {
+	t.Helper()
+
+	logicalName := os.Getenv(winHelloSilentUnwrapLogicalEnv)
+	if logicalName == "" {
+		t.Fatal("silent unwrap child missing logical name")
+	}
+	wrappedBase64 := os.Getenv(winHelloSilentUnwrapWrappedEnv)
+	if wrappedBase64 == "" {
+		t.Fatal("silent unwrap child missing wrapped CEK")
+	}
+
+	wrapped, err := base64.StdEncoding.DecodeString(wrappedBase64)
+	if err != nil {
+		t.Fatalf("decode wrapped CEK: %v", err)
+	}
+
+	passportKey, err := openWinHelloPassportKey(logicalName, 0)
+	if err != nil {
+		t.Fatalf("openWinHelloPassportKey() failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := passportKey.Close(); err != nil {
+			t.Errorf("Close() failed: %v", err)
+		}
+	})
+
+	_, err = passportKey.unwrapKeyWithFlags(wrapped, "Silent unwrap regression test", winHelloNCryptSilentFlag)
+	if err == nil {
+		t.Fatal("silent unwrap unexpectedly succeeded")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "silent") {
+		t.Fatalf("silent unwrap error = %v, want silent-context failure", err)
 	}
 }
 

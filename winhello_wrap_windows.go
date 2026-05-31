@@ -47,6 +47,11 @@ func (key *winHelloPassportKey) WrapKey(cek []byte) ([]byte, error) {
 }
 
 func (key *winHelloPassportKey) UnwrapKey(wrapped []byte, context string) ([]byte, error) {
+	return key.unwrapKeyWithFlags(wrapped, context, 0)
+}
+
+// The extraFlags are only required for a security regression test: Passing the silent flag here should fail, that's our whole premise.
+func (key *winHelloPassportKey) unwrapKeyWithFlags(wrapped []byte, context string, extraFlags uint32) ([]byte, error) {
 	var cek []byte
 
 	err := key.withOperationKey(func(handle ncryptHandle) error {
@@ -55,7 +60,7 @@ func (key *winHelloPassportKey) UnwrapKey(wrapped []byte, context string) ([]byt
 		}
 
 		var err error
-		cek, err = winHelloNCryptDecryptFunc(handle, wrapped, nil, winHelloNCryptPadPKCS1Flag)
+		cek, err = winHelloNCryptDecryptFunc(handle, wrapped, nil, winHelloNCryptPadPKCS1Flag|extraFlags)
 		if err != nil {
 			return fmt.Errorf("unwrap CEK with Passport key: %w", err)
 		}

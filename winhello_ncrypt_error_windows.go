@@ -26,6 +26,7 @@ const (
 	winHelloNCryptWindowHandleProperty              = "HWND Handle"
 
 	winHelloNCryptPadPKCS1Flag = 0x00000002
+	winHelloNCryptSilentFlag   = 0x00000040 // Used only for a security test - silent mode may never allow accessing the key
 
 	winHelloNCryptAllowDecryptFlag          = 0x00000001
 	winHelloNCryptAllowSigningFlag          = 0x00000002
