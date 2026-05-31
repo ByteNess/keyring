@@ -3,6 +3,11 @@
 
 package keyring
 
+import (
+	"errors"
+	"fmt"
+)
+
 const winHelloPassportDefaultLogicalName = "keyring-winhello-v1"
 
 var (
@@ -45,17 +50,23 @@ func newWinHelloKeyring(serviceName string) (*winHelloKeyring, error) {
 func (k *winHelloKeyring) Get(key string) (Item, error) {
 	encoded, err := k.store.Read(key)
 	if err != nil {
-		return Item{}, err
+		return Item{}, fmt.Errorf("read winhello item %q: %w", key, err)
 	}
 
 	wrapper, err := k.openWrapper()
 	if err != nil {
-		return Item{}, err
+		return Item{}, winHelloWrapExistingItemPassportKeyError(key, err)
 	}
 
-	plaintext, err := decryptWinHelloEnvelope(encoded, winHelloAAD(k.serviceName, key), k.keyName, wrapper, "")
+	plaintext, err := decryptWinHelloEnvelope(
+		encoded,
+		winHelloAAD(k.serviceName, key),
+		k.keyName,
+		wrapper,
+		winHelloUseContext(k.serviceName, key),
+	)
 	if err != nil {
-		return Item{}, err
+		return Item{}, fmt.Errorf("decrypt winhello item %q: %w", key, err)
 	}
 
 	return Item{Key: key, Data: plaintext}, nil
@@ -68,23 +79,36 @@ func (k *winHelloKeyring) GetMetadata(_ string) (Metadata, error) {
 func (k *winHelloKeyring) Set(item Item) error {
 	wrapper, err := k.ensureWrapper()
 	if err != nil {
-		return err
+		return fmt.Errorf("prepare winhello Passport key for %q: %w", item.Key, err)
 	}
 
 	encoded, err := encryptWinHelloEnvelope(item.Data, winHelloAAD(k.serviceName, item.Key), k.keyName, wrapper)
 	if err != nil {
-		return err
+		return fmt.Errorf("encrypt winhello item %q: %w", item.Key, err)
 	}
 
-	return k.store.Write(item.Key, encoded)
+	if err := k.store.Write(item.Key, encoded); err != nil {
+		return fmt.Errorf("write winhello item %q: %w", item.Key, err)
+	}
+
+	return nil
 }
 
 func (k *winHelloKeyring) Remove(key string) error {
-	return k.store.Delete(key)
+	if err := k.store.Delete(key); err != nil {
+		return fmt.Errorf("remove winhello item %q: %w", key, err)
+	}
+
+	return nil
 }
 
 func (k *winHelloKeyring) Keys() ([]string, error) {
-	return k.store.Keys()
+	keys, err := k.store.Keys()
+	if err != nil {
+		return nil, fmt.Errorf("list winhello items: %w", err)
+	}
+
+	return keys, nil
 }
 
 func (k *winHelloKeyring) ensureWrapper() (winHelloKeyWrapper, error) {
@@ -94,7 +118,7 @@ func (k *winHelloKeyring) ensureWrapper() (winHelloKeyWrapper, error) {
 
 	// Keep Windows Hello activity out of Keys/Remove/GetMetadata and only touch
 	// the shared Passport key when an operation actually needs crypto.
-	wrapper, err := winHelloEnsurePassportKeyFunc(k.logicalName, 0)
+	wrapper, err := winHelloEnsurePassportKeyFunc(k.logicalName, winHelloParentHWNDFunc())
 	if err != nil {
 		return nil, err
 	}
@@ -108,11 +132,34 @@ func (k *winHelloKeyring) openWrapper() (winHelloKeyWrapper, error) {
 		return k.wrapper, nil
 	}
 
-	wrapper, err := winHelloOpenPassportKeyFunc(k.logicalName, 0)
+	wrapper, err := winHelloOpenPassportKeyFunc(k.logicalName, winHelloParentHWNDFunc())
 	if err != nil {
 		return nil, err
 	}
 
 	k.wrapper = wrapper
 	return wrapper, nil
+}
+
+func winHelloUseContext(serviceName, key string) string {
+	if serviceName == "" {
+		serviceName = "default"
+	}
+	if key == "" {
+		return "Unlock keyring secret for " + serviceName
+	}
+
+	return "Unlock keyring secret for " + key + " at " + serviceName
+}
+
+func winHelloWrapExistingItemPassportKeyError(key string, err error) error {
+	if errors.Is(err, ErrKeyNotFound) || errors.Is(err, errWinHelloPassportKeyNotFound) {
+		return fmt.Errorf(
+			"open winhello Passport key for existing item %q: %w",
+			key,
+			errWinHelloPassportKeyNotFound,
+		)
+	}
+
+	return fmt.Errorf("open winhello Passport key for existing item %q: %w", key, err)
 }

@@ -131,6 +131,9 @@ func TestWinHelloKeyringSetGetKeysAndRemoveRoundTrip(t *testing.T) {
 	defer restore()
 
 	directory := stubWinHelloKeyringStoreHooks(t)
+	winHelloParentHWNDFunc = func() uintptr {
+		return 1234
+	}
 	ring, err := newWinHelloKeyring("svc")
 	if err != nil {
 		t.Fatalf("newWinHelloKeyring() failed: %v", err)
@@ -182,8 +185,8 @@ func TestWinHelloKeyringSetGetKeysAndRemoveRoundTrip(t *testing.T) {
 	if wrapper.unwrapCalls != 1 {
 		t.Fatalf("unwrapCalls = %d, want 1", wrapper.unwrapCalls)
 	}
-	if wrapper.lastContext != "" {
-		t.Fatalf("unwrap context = %q, want empty string", wrapper.lastContext)
+	if got, want := wrapper.lastContext, winHelloUseContext(ring.serviceName, item.Key); got != want {
+		t.Fatalf("unwrap context = %q, want %q", got, want)
 	}
 
 	keys, err := ring.Keys()
@@ -212,6 +215,9 @@ func TestWinHelloKeyringSetEnsuresPassportKeyLazily(t *testing.T) {
 	defer restore()
 
 	_ = stubWinHelloKeyringStoreHooks(t)
+	winHelloParentHWNDFunc = func() uintptr {
+		return 1234
+	}
 	ring, err := newWinHelloKeyring("svc")
 	if err != nil {
 		t.Fatalf("newWinHelloKeyring() failed: %v", err)
@@ -225,8 +231,8 @@ func TestWinHelloKeyringSetEnsuresPassportKeyLazily(t *testing.T) {
 		if logicalName != ring.logicalName {
 			t.Fatalf("logicalName = %q, want %q", logicalName, ring.logicalName)
 		}
-		if hwnd != 0 {
-			t.Fatalf("hwnd = %d, want 0", hwnd)
+		if hwnd != 1234 {
+			t.Fatalf("hwnd = %d, want 1234", hwnd)
 		}
 		return wrapper, nil
 	}
@@ -284,6 +290,9 @@ func TestWinHelloKeyringGetOpensPassportKeyLazily(t *testing.T) {
 	defer restore()
 
 	_ = stubWinHelloKeyringStoreHooks(t)
+	winHelloParentHWNDFunc = func() uintptr {
+		return 1234
+	}
 
 	encryptingRing, err := newWinHelloKeyring("svc")
 	if err != nil {
@@ -313,8 +322,8 @@ func TestWinHelloKeyringGetOpensPassportKeyLazily(t *testing.T) {
 		if logicalName != readingRing.logicalName {
 			t.Fatalf("logicalName = %q, want %q", logicalName, readingRing.logicalName)
 		}
-		if hwnd != 0 {
-			t.Fatalf("hwnd = %d, want 0", hwnd)
+		if hwnd != 1234 {
+			t.Fatalf("hwnd = %d, want 1234", hwnd)
 		}
 		return wrapper, nil
 	}
@@ -334,6 +343,43 @@ func TestWinHelloKeyringGetOpensPassportKeyLazily(t *testing.T) {
 	}
 	if readingRing.wrapper != wrapper {
 		t.Fatal("Get() did not cache the opened wrapper")
+	}
+}
+
+func TestWinHelloKeyringGetMapsMissingPassportKeyForExistingItem(t *testing.T) {
+	restore := stubWinHelloKeyringHooks(t)
+	defer restore()
+
+	_ = stubWinHelloKeyringStoreHooks(t)
+
+	encryptingRing, err := newWinHelloKeyring("svc")
+	if err != nil {
+		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+	}
+	encryptingRing.wrapper = &fakeWinHelloBackendWrapper{}
+
+	item := Item{Key: "item", Data: []byte("passport-missing")}
+	if err := encryptingRing.Set(item); err != nil {
+		t.Fatalf("Set() failed: %v", err)
+	}
+
+	readingRing, err := newWinHelloKeyring("svc")
+	if err != nil {
+		t.Fatalf("newWinHelloKeyring() failed: %v", err)
+	}
+	winHelloOpenPassportKeyFunc = func(_ string, _ uintptr) (winHelloKeyWrapper, error) {
+		return nil, errWinHelloPassportKeyNotFound
+	}
+
+	_, err = readingRing.Get(item.Key)
+	if !errors.Is(err, errWinHelloPassportKeyNotFound) {
+		t.Fatalf("Get() error = %v, want %v", err, errWinHelloPassportKeyNotFound)
+	}
+	if errors.Is(err, ErrKeyNotFound) {
+		t.Fatalf("Get() error = %v, should not look like missing item", err)
+	}
+	if got, want := err.Error(), `open winhello Passport key for existing item "item": `+errWinHelloPassportKeyNotFound.Error(); got != want {
+		t.Fatalf("Get() error text = %q, want %q", got, want)
 	}
 }
 
@@ -465,16 +511,22 @@ func stubWinHelloKeyringHooks(t *testing.T) func() {
 	oldLogicalName := winHelloPassportLogicalNameFunc
 	oldEnsure := winHelloEnsurePassportKeyFunc
 	oldOpen := winHelloOpenPassportKeyFunc
+	oldParentHWND := winHelloParentHWNDFunc
 
 	return func() {
 		winHelloPassportLogicalNameFunc = oldLogicalName
 		winHelloEnsurePassportKeyFunc = oldEnsure
 		winHelloOpenPassportKeyFunc = oldOpen
+		winHelloParentHWNDFunc = oldParentHWND
 	}
 }
 
 func stubWinHelloKeyringStoreHooks(t *testing.T) *fakeWinHelloKeyringCredentialDirectory {
 	t.Helper()
+
+	oldGet := winHelloGetGenericCredentialFunc
+	oldNew := winHelloNewGenericCredentialFunc
+	oldList := winHelloListCredentialsFunc
 
 	directory := &fakeWinHelloKeyringCredentialDirectory{blobs: map[string][]byte{}}
 	winHelloGetGenericCredentialFunc = func(target string) (winHelloWinCredCredential, error) {
@@ -502,6 +554,12 @@ func stubWinHelloKeyringStoreHooks(t *testing.T) *fakeWinHelloKeyringCredentialD
 		}
 		return results, nil
 	}
+
+	t.Cleanup(func() {
+		winHelloGetGenericCredentialFunc = oldGet
+		winHelloNewGenericCredentialFunc = oldNew
+		winHelloListCredentialsFunc = oldList
+	})
 
 	return directory
 }
