@@ -13,13 +13,12 @@ const (
 	winHelloPassportCreateContext = "Create keyring winhello key"
 )
 
-// winHelloPassportKey keeps the long-lived provider handle and derived
-// Passport key name. Callers reopen the key by name for concrete operations
-// instead of keeping a key handle pinned for the lifetime of the backend.
+// winHelloPassportKey keeps only stable metadata needed to reopen the
+// Passport-backed key on demand. Each cryptographic operation should open its
+// own provider/key handles rather than sharing NCrypt handles across calls.
 type winHelloPassportKey struct {
-	provider ncryptHandle
-	keyName  string
-	hwnd     uintptr
+	keyName string
+	hwnd    uintptr
 }
 
 var (
@@ -38,26 +37,26 @@ func openWinHelloPassportKey(logicalName string, hwnd uintptr) (*winHelloPasspor
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		_ = winHelloNCryptFreeObjectFunc(provider)
+	}()
 
 	// A successful open here is only a probe that confirms the persisted
-	// Passport key already exists. The provider handle is what we keep.
+	// Passport key already exists.
 	keyHandle, err := winHelloNCryptOpenKeyFunc(provider, keyName, 0, 0)
 	if err != nil {
-		_ = winHelloNCryptFreeObjectFunc(provider)
 		if isWinHelloNCryptKeyNotFound(err) {
 			return nil, ErrKeyNotFound
 		}
 		return nil, fmt.Errorf("open Passport key %q: %w", keyName, err)
 	}
 	if err := winHelloNCryptFreeObjectFunc(keyHandle); err != nil {
-		_ = winHelloNCryptFreeObjectFunc(provider)
 		return nil, fmt.Errorf("free Passport key %q: %w", keyName, err)
 	}
 
 	return &winHelloPassportKey{
-		provider: provider,
-		keyName:  keyName,
-		hwnd:     hwnd,
+		keyName: keyName,
+		hwnd:    hwnd,
 	}, nil
 }
 
@@ -98,23 +97,21 @@ func ensureWinHelloPassportKey(logicalName string, hwnd uintptr) (*winHelloPassp
 		_ = winHelloNCryptFreeObjectFunc(provider)
 		return nil, fmt.Errorf("free Passport key %q after finalize: %w", keyName, err)
 	}
+	if err := winHelloNCryptFreeObjectFunc(provider); err != nil {
+		return nil, fmt.Errorf("free Passport provider after create %q: %w", keyName, err)
+	}
 
 	return &winHelloPassportKey{
-		provider: provider,
-		keyName:  keyName,
-		hwnd:     hwnd,
+		keyName: keyName,
+		hwnd:    hwnd,
 	}, nil
 }
 
 func (key *winHelloPassportKey) Close() error {
-	if key == nil || key.provider == 0 {
+	if key == nil {
 		return nil
 	}
-
-	provider := key.provider
-	key.provider = 0
-
-	return winHelloNCryptFreeObjectFunc(provider)
+	return nil
 }
 
 func winHelloOpenPassportProvider(logicalName string, hwnd uintptr) (ncryptHandle, string, error) {

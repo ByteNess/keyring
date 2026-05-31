@@ -30,7 +30,7 @@ func TestWinHelloPassportCloseIsIdempotent(t *testing.T) {
 		return nil
 	}
 
-	passportKey := &winHelloPassportKey{provider: ncryptHandle(41)}
+	passportKey := &winHelloPassportKey{keyName: "close-idempotent"}
 	if err := passportKey.Close(); err != nil {
 		t.Fatalf("first Close() failed: %v", err)
 	}
@@ -38,11 +38,8 @@ func TestWinHelloPassportCloseIsIdempotent(t *testing.T) {
 		t.Fatalf("second Close() failed: %v", err)
 	}
 
-	if len(freed) != 1 || freed[0] != ncryptHandle(41) {
-		t.Fatalf("freed handles = %v, want [%d]", freed, ncryptHandle(41))
-	}
-	if passportKey.provider != 0 {
-		t.Fatalf("provider handle = %d, want 0", passportKey.provider)
+	if len(freed) != 0 {
+		t.Fatalf("freed handles = %v, want none", freed)
 	}
 }
 
@@ -173,8 +170,8 @@ func TestWinHelloPassportEnsureCreatesKey(t *testing.T) {
 	if !finalized {
 		t.Fatal("expected finalize to run")
 	}
-	if passportKey.provider != ncryptHandle(21) {
-		t.Fatalf("provider handle = %d, want %d", passportKey.provider, ncryptHandle(21))
+	if passportKey.keyName == "" {
+		t.Fatal("key name = empty, want derived key name")
 	}
 	if passportKey.hwnd != 99 {
 		t.Fatalf("hwnd = %d, want %d", passportKey.hwnd, 99)
@@ -189,6 +186,9 @@ func TestWinHelloPassportEnsureCreatesKey(t *testing.T) {
 	assertPassportPropertyCall(t, properties, ncryptHandle(22), winHelloNCryptUseContextProperty, winHelloPassportCreateContext)
 	if !containsPassportHandle(freed, ncryptHandle(22)) {
 		t.Fatalf("freed handles = %v, want created key handle to be freed", freed)
+	}
+	if !containsPassportHandle(freed, ncryptHandle(21)) {
+		t.Fatalf("freed handles = %v, want provider handle to be freed", freed)
 	}
 }
 
@@ -292,20 +292,20 @@ func TestWinHelloPassportOpenExistingKeyFreesProbeHandle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openWinHelloPassportKey() failed: %v", err)
 	}
-	if passportKey.provider != ncryptHandle(71) {
-		t.Fatalf("provider handle = %d, want %d", passportKey.provider, ncryptHandle(71))
+	if passportKey.keyName == "" {
+		t.Fatal("key name = empty, want derived key name")
 	}
 	if !containsPassportHandle(freed, ncryptHandle(72)) {
 		t.Fatalf("freed handles = %v, want probe key handle to be freed", freed)
 	}
-	if containsPassportHandle(freed, ncryptHandle(71)) {
-		t.Fatalf("freed handles = %v, did not expect provider to be freed before Close", freed)
+	if !containsPassportHandle(freed, ncryptHandle(71)) {
+		t.Fatalf("freed handles = %v, want provider handle to be freed during open", freed)
 	}
 	if err := passportKey.Close(); err != nil {
 		t.Fatalf("Close() failed: %v", err)
 	}
-	if !containsPassportHandle(freed, ncryptHandle(71)) {
-		t.Fatalf("freed handles = %v, want provider handle to be freed by Close", freed)
+	if len(freed) != 2 {
+		t.Fatalf("freed handles = %v, want only probe key and provider frees", freed)
 	}
 }
 
