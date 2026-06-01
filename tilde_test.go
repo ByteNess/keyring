@@ -1,41 +1,63 @@
-//go:build linux
-// +build linux
-
 package keyring
 
-import "testing"
+import (
+	"runtime"
+	"strings"
+	"testing"
+)
 
-func TestExpandTilde(t *testing.T) {
-	t.Setenv("HOME", "/home/testing")
+func TestExpandTildeForwardSlash(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
 	actual, err := ExpandTilde("~/one/two")
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := "/home/testing/one/two"
+	// strings.Replace preserves the caller's separator; Windows path APIs accept
+	// forward slashes, so we compare against the same substitution the function does.
+	expected := strings.Replace("~/one/two", "~", home, 1)
 	if actual != expected {
-		t.Fatalf("%s != %s", expected, actual)
+		t.Fatalf("got %s, want %s", actual, expected)
 	}
 }
 
-func TestExpandTildeWithoutSlash(t *testing.T) {
-	t.Setenv("HOME", "/home/testing")
-	actual, err := ExpandTilde("~one/two")
+// TestExpandTildeBackslash verifies that ~\path expands on Windows, where
+// backslash is a path separator. The test is skipped on other platforms where
+// backslash is a valid filename character, not a separator.
+func TestExpandTildeBackslash(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("backslash path separator only meaningful on Windows")
+	}
+
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+
+	actual, err := ExpandTilde(`~\one\two`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := "~one/two"
+	expected := strings.Replace(`~\one\two`, "~", home, 1)
 	if actual != expected {
-		t.Fatalf("%s != %s", expected, actual)
+		t.Fatalf("got %s, want %s", actual, expected)
 	}
 }
-func TestExpandTildeWithoutLeadingTilde(t *testing.T) {
-	t.Setenv("HOME", "/home/testing")
-	actual, err := ExpandTilde("one/two~")
-	if err != nil {
-		t.Fatal(err)
+
+func TestExpandTildeNoExpansion(t *testing.T) {
+	cases := []string{"~one/two", "one/two~", "one/two", "~"}
+	if runtime.GOOS != "windows" {
+		// On non-Windows platforms backslash is a valid filename character,
+		// not a path separator, so ~\foo must not be expanded.
+		cases = append(cases, `~\one\two`)
 	}
-	expected := "one/two~"
-	if actual != expected {
-		t.Fatalf("%s != %s", expected, actual)
+	for _, c := range cases {
+		actual, err := ExpandTilde(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if actual != c {
+			t.Fatalf("input %q: got %q, want no expansion", c, actual)
+		}
 	}
 }

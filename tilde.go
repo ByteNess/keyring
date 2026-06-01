@@ -3,20 +3,33 @@ package keyring
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
-var tildePrefix = string([]rune{'~', filepath.Separator})
+// tildePrefixes are the tilde+separator combinations that trigger home-dir expansion.
+// On Windows both ~\ (native) and ~/ (common in config files) are accepted;
+// on other platforms only ~/ (the native separator) is recognised.
+var tildePrefixes = func() []string {
+	native := string([]rune{'~', filepath.Separator})
+	if runtime.GOOS == "windows" {
+		return []string{native, "~/"}
+	}
+	return []string{native}
+}()
 
-// ExpandTilde will expand tilde (~/ or ~\ depending on OS) for the user home directory.
+// ExpandTilde will expand tilde (~/ and/or ~\ depending on OS) for the user home directory.
 func ExpandTilde(dir string) (string, error) {
-	if strings.HasPrefix(dir, tildePrefix) {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
+	for _, prefix := range tildePrefixes {
+		if strings.HasPrefix(dir, prefix) {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return "", err
+			}
+			dir = strings.Replace(dir, "~", homeDir, 1)
+			debugf("Expanded file dir to %s", dir)
+			break
 		}
-		dir = strings.Replace(dir, "~", homeDir, 1)
-		debugf("Expanded file dir to %s", dir)
 	}
 	return dir, nil
 }
