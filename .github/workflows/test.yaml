@@ -48,3 +48,13 @@ jobs:
           brew link passage
 
       - run: go test -race ./...
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+      - run: go test -race ./...
