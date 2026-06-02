@@ -138,12 +138,12 @@ func winHelloInitializePassportKey(key ncryptHandle, hwnd uintptr) error {
 	// Key-level prompt ownership is also best-effort for the same reason.
 	_ = winHelloSetWindowHandleIfPresent(key, hwnd)
 	// These properties are the Passport-specific creation shape validated by the
-	// PoC: RSA-2048, decrypt/sign usage, NGC cache policy, and a Use Context
+	// PoC: RSA-2048, decrypt usage, NGC cache policy, and a Use Context
 	// string that Windows Hello can surface in the prompt.
 	if err := winHelloNCryptSetUint32PropertyFunc(key, winHelloNCryptLengthProperty, winHelloPassportKeyBits); err != nil {
 		return err
 	}
-	if err := winHelloNCryptSetUint32PropertyFunc(key, winHelloNCryptKeyUsageProperty, winHelloNCryptAllowDecryptFlag|winHelloNCryptAllowSigningFlag); err != nil {
+	if err := winHelloNCryptSetUint32PropertyFunc(key, winHelloNCryptKeyUsageProperty, winHelloNCryptAllowDecryptFlag); err != nil {
 		return err
 	}
 	if err := winHelloSetPassportNgcCacheType(key); err != nil {

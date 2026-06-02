@@ -183,7 +183,7 @@ func TestWinHelloPassportEnsureCreatesKey(t *testing.T) {
 	assertPassportPropertyCall(t, properties, ncryptHandle(21), winHelloNCryptWindowHandleProperty, uintptr(99))
 	assertPassportPropertyCall(t, properties, ncryptHandle(22), winHelloNCryptWindowHandleProperty, uintptr(99))
 	assertPassportPropertyCall(t, properties, ncryptHandle(22), winHelloNCryptLengthProperty, uint32(winHelloPassportKeyBits))
-	assertPassportPropertyCall(t, properties, ncryptHandle(22), winHelloNCryptKeyUsageProperty, uint32(winHelloNCryptAllowDecryptFlag|winHelloNCryptAllowSigningFlag))
+	assertPassportPropertyCall(t, properties, ncryptHandle(22), winHelloNCryptKeyUsageProperty, uint32(winHelloNCryptAllowDecryptFlag))
 	assertPassportPropertyCall(t, properties, ncryptHandle(22), winHelloNCryptNgcCacheTypeProperty, uint32(winHelloNCryptNgcCacheTypeAuthMandatory))
 	assertPassportPropertyCall(t, properties, ncryptHandle(22), winHelloNCryptNgcCacheTypeLegacyProperty, uint32(winHelloNCryptNgcCacheTypeAuthMandatory))
 	assertPassportPropertyCall(t, properties, ncryptHandle(22), winHelloNCryptUseContextProperty, winHelloPassportCreateContext)
@@ -399,8 +399,8 @@ func TestWinHelloPassportEnsureFreesHandlesWhenFinalizeFails(t *testing.T) {
 				t.Fatalf("length value = %d, want %d", value, uint32(winHelloPassportKeyBits))
 			}
 		case winHelloNCryptKeyUsageProperty:
-			if value != uint32(winHelloNCryptAllowDecryptFlag|winHelloNCryptAllowSigningFlag) {
-				t.Fatalf("key usage value = %d, want %d", value, uint32(winHelloNCryptAllowDecryptFlag|winHelloNCryptAllowSigningFlag))
+			if value != uint32(winHelloNCryptAllowDecryptFlag) {
+				t.Fatalf("key usage value = %d, want %d", value, uint32(winHelloNCryptAllowDecryptFlag))
 			}
 		case winHelloNCryptNgcCacheTypeProperty:
 			if value != uint32(winHelloNCryptNgcCacheTypeAuthMandatory) {
@@ -550,8 +550,8 @@ func runPassportEnsureWindowHandleErrorTest(t *testing.T, testCase passportWindo
 				t.Fatalf("length value = %d, want %d", value, uint32(winHelloPassportKeyBits))
 			}
 		case winHelloNCryptKeyUsageProperty:
-			if value != uint32(winHelloNCryptAllowDecryptFlag|winHelloNCryptAllowSigningFlag) {
-				t.Fatalf("key usage value = %d, want %d", value, uint32(winHelloNCryptAllowDecryptFlag|winHelloNCryptAllowSigningFlag))
+			if value != uint32(winHelloNCryptAllowDecryptFlag) {
+				t.Fatalf("key usage value = %d, want %d", value, uint32(winHelloNCryptAllowDecryptFlag))
 			}
 		case winHelloNCryptNgcCacheTypeProperty:
 			if value != uint32(winHelloNCryptNgcCacheTypeAuthMandatory) {
