@@ -96,7 +96,10 @@ func encryptWinHelloEnvelope(
 
 	ciphertext := gcm.Seal(nil, nonce, plaintext, aad)
 
-	wrappedCEK, err := wrapper.WrapKey(bytes.Clone(cek))
+	wrapInput := bytes.Clone(cek)
+	defer zeroBytes(wrapInput)
+
+	wrappedCEK, err := wrapper.WrapKey(wrapInput)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errWinHelloWrapKey, err)
 	}
