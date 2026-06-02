@@ -71,7 +71,7 @@ does not protect against malware that can read process memory after a successful
 unlock, inject into an approved process, or steal credentials after they are
 handed to a caller.
 
-To force the Windows Hello backend on Windows:
+To use the Windows Hello backend on Windows:
 
 ```go
 ring, err := keyring.Open(keyring.Config{
