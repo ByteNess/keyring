@@ -12,6 +12,7 @@ Keyring provides a common interface to a range of secure credential storage serv
 Currently Keyring supports the following backends
  * [macOS Keychain](https://support.apple.com/en-au/guide/keychain-access/welcome/mac) (with TouchID support 🎉)
  * [Windows Credential Manager](https://support.microsoft.com/en-au/help/4026814/windows-accessing-credential-manager)
+ * [Windows Hello](https://support.microsoft.com/en-us/windows/configure-windows-hello-dae28983-8242-bb2a-d3d1-87c9d265a5f0)-gated encrypted Credential Manager backend
  * Secret Service ([Gnome Keyring](https://wiki.gnome.org/Projects/GnomeKeyring), [KWallet](https://kde.org/applications/system/org.kde.kwalletmanager5))
  * [KWallet](https://kde.org/applications/system/org.kde.kwalletmanager5)
  * [Pass](https://www.passwordstore.org/)
@@ -48,6 +49,40 @@ To configure TouchId biometrics:
 keyring.Config.UseBiometrics = true
 keyring.Config.TouchIDAccount = "cc.byteness.aws-vault.biometrics"
 keyring.Config.TouchIDService = "aws-vault"
+```
+
+### Windows Hello backend
+
+The `winhello` backend stores encrypted envelopes in Windows Credential Manager.
+This may sound similar to the `wincred` backend, but the difference is encryption.
+Here, we don't store plaintext item data in Credential Manager. It is encrypted
+with AES-256-GCM, and the content encryption key is wrapped by a Windows Hello /
+Passport KSP key and unwrapped through an interactive private-key operation.
+
+Upon the first use, a new Passport KSP key is created and stored in the user's
+protected key store. This operation requires user interaction and Windows Hello
+authentication. Later, whenever an item is accessed, the content encryption key
+is unwrapped by the Passport KSP key, which requires Windows Hello authentication
+again. This means that every access to the stored secrets requires user presence
+and authentication through Windows Hello (using PIN, fingerprint, face ID, etc.).
+
+This protects against silent reads of the stored Credential Manager blob. It
+does not protect against malware that can read process memory after a successful
+unlock, inject into an approved process, or steal credentials after they are
+handed to a caller.
+
+To use the Windows Hello backend on Windows:
+
+```go
+ring, err := keyring.Open(keyring.Config{
+  ServiceName: "example",
+  AllowedBackends: []keyring.BackendType{
+    keyring.WinHelloBackend,
+  },
+})
+if err != nil {
+  return err
+}
 ```
 
 For more detail on the API please check [the keyring godocs](https://godoc.org/github.com/byteness/keyring)
