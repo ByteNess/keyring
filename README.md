@@ -23,7 +23,6 @@ Currently Keyring supports the following backends
  * [1Password Service Accounts](https://developer.1password.com/docs/service-accounts)
  * [1Password Desktop Application Integration](https://developer.1password.com/docs/sdks/desktop-app-integrations/)
 
-
 ## Usage
 
 The short version of how to use keyring is shown below.
@@ -126,19 +125,13 @@ vagrant up
 ./bin/go-test
 ```
 
+## 🧰 Contributing
 
-## Contributing
+Report issues/questions/feature requests on in the [issues](https://github.com/byteness/keyring/issues/new) section.
 
-Contributions to the keyring package are most welcome from engineers of all backgrounds and skill levels. In particular the addition of extra backends across popular operating systems would be appreciated.
+Full contributing [guidelines are covered here](.github/CONTRIBUTING.md).
 
-This project will adhere to the [Go Community Code of Conduct](https://golang.org/conduct) in the github provided discussion spaces, with the moderators being the part of ByteNess engineering team.
+## Maintainers
 
-To make a contribution:
-
-  * Fork the repository
-  * Make your changes on the fork
-  * Submit a pull request back to this repo with a clear description of the problem you're solving
-  * Ensure your PR passes all current (and new) tests
-  * Ideally verify that [aws-vault](https://github.com/byteness/aws-vault) works with your changes (optional)
-
-...and we'll do our best to get your work merged in!
+* [Marko Bevc](https://github.com/mbevc1)
+* Full [contributors list](https://github.com/byteness/keyring/graphs/contributors)
