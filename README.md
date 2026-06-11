@@ -23,7 +23,6 @@ Currently Keyring supports the following backends
  * [1Password Service Accounts](https://developer.1password.com/docs/service-accounts)
  * [1Password Desktop Application Integration](https://developer.1password.com/docs/sdks/desktop-app-integrations/)
 
-
 ## Usage
 
 The short version of how to use keyring is shown below.
@@ -87,7 +86,6 @@ if err != nil {
 
 For more detail on the API please check [the keyring godocs](https://godoc.org/github.com/byteness/keyring)
 
-
 ## Testing
 
 [Vagrant](https://www.vagrantup.com/) is used to create linux and windows test environments.
@@ -100,8 +98,17 @@ vagrant up
 ./bin/go-test
 ```
 
-
 ## Contributing
+
+### Before you start
+
+Please read the following first:
+
+- **[AI_POLICY.md](../AI_POLICY.md)** — if you intend to use any AI assistance (Claude, Copilot, Cursor, etc.) for your contribution. The short version: AI is welcome, but its use must be disclosed, code must be human-tested, and AI-generated PRs require an accepted issue first. Drive-by AI PRs will be closed.
+
+Please only submit changes to backends you can actually test on the relevant platform. Untested code for platforms you don't have access to is one of the failure modes called out in `AI_POLICY.md` and applies to manual contributions too.
+
+### How to contribute
 
 Contributions to the keyring package are most welcome from engineers of all backgrounds and skill levels. In particular the addition of extra backends across popular operating systems would be appreciated.
 
