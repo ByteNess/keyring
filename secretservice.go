@@ -50,7 +50,7 @@ type secretsKeyring struct {
 	session    *libsecret.Session
 }
 
-var errCollectionNotFound = errors.New("The collection does not exist. Please add a key first")
+var errCollectionNotFound = errors.New("the collection does not exist, please add a key first")
 
 func decodeKeyringString(src string) string {
 	var dst strings.Builder
@@ -169,7 +169,7 @@ func (k *secretsKeyring) Get(key string) (Item, error) {
 // automatically maintained last-modification timestamp, so to use this we'd
 // need to have a SetMetadata API too.  Which we're not yet doing, but feel
 // free to contribute patches.
-func (k *secretsKeyring) GetMetadata(key string) (Metadata, error) {
+func (k *secretsKeyring) GetMetadata(_ string) (Metadata, error) {
 	return Metadata{}, ErrMetadataNeedsCredentials
 }
 

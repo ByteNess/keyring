@@ -544,6 +544,7 @@ func NewOPStandardKeyringMock_GetItem(
 	keyring *OPStandardKeyring,
 	opItemsExisting []onepassword.Item,
 ) *MockOPStandardClientAPI {
+	t.Helper()
 	opClientMock := NewMockOPStandardClientAPI(t)
 	keyring.Client = opClientMock
 
@@ -567,7 +568,7 @@ func NewOPStandardKeyringMock_GetItem(
 	opClientMock.On("List", matchedByContext, keyring.VaultID, matchedByOpItemListFilter).
 		Return(
 			func(_ context.Context, _ string, _ ...onepassword.ItemListFilter) ([]onepassword.ItemOverview, error) {
-				opItemOverviews := []onepassword.ItemOverview{}
+				opItemOverviews := make([]onepassword.ItemOverview, 0, len(opItemsExisting))
 				for _, opItem := range opItemsExisting {
 					opItemOverviews = append(opItemOverviews, onepassword.ItemOverview{
 						ID:        opItem.ID,
@@ -610,6 +611,7 @@ func NewOPStandardKeyringMock_SetItem(
 	opItemsExisting []onepassword.Item,
 	opItemSet *onepassword.Item,
 ) *MockOPStandardClientAPI {
+	t.Helper()
 	opClientMock := NewOPStandardKeyringMock_GetItem(t, keyring, opItemsExisting)
 
 	matchedByContext := mock.MatchedBy(func(ctx context.Context) bool {
@@ -660,6 +662,7 @@ func NewOPStandardKeyringMock_RemoveItem(
 	opItemsExisting []onepassword.Item,
 	opItemIDRemoved *string,
 ) *MockOPStandardClientAPI {
+	t.Helper()
 	opClientMock := NewOPStandardKeyringMock_GetItem(t, keyring, opItemsExisting)
 
 	matchedByContext := mock.MatchedBy(func(ctx context.Context) bool {

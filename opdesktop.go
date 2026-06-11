@@ -11,10 +11,13 @@ import (
 	onepassword "github.com/1password/onepassword-sdk-go"
 )
 
+// OPDesktopEnvAccountID is the environment variable holding the 1Password
+// Desktop account ID.
 const (
 	OPDesktopEnvAccountID = "OP_DESKTOP_ACCOUNT_ID"
 )
 
+// Errors returned by the 1Password Desktop Integration backend.
 var (
 	OPDesktopErrAccountID = fmt.Errorf(
 		"%w: %w: %#v",
@@ -23,8 +26,8 @@ var (
 		OPDesktopEnvAccountID,
 	)
 
-	OPDesktopErrClient    = errors.New("Unable to create a 1Password Desktop client")
-	OPDesktopErrKeyring   = errors.New("Unable to create a 1Password Desktop keyring")
+	OPDesktopErrClient    = errors.New("unable to create a 1Password Desktop client")
+	OPDesktopErrKeyring   = errors.New("unable to create a 1Password Desktop keyring")
 	OPDesktopErrNewClient = fmt.Errorf(
 		"%w: onepassword.NewClient returned an error",
 		OPDesktopErrClient,
@@ -54,6 +57,7 @@ type OPDesktopKeyring struct {
 	fullClient *onepassword.Client
 }
 
+// NewOPDesktopKeyring creates a new 1Password Desktop Integration keyring.
 func NewOPDesktopKeyring(cfg *Config) (*OPDesktopKeyring, error) {
 	errs := []error{}
 

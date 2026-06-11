@@ -11,13 +11,16 @@ import (
 	onepassword "github.com/1password/onepassword-sdk-go"
 )
 
+// OPSrvAccountEnvToken is the environment variable holding the 1Password
+// Service Accounts token.
 const (
 	OPSrvAccountEnvToken = "OP_SERVICE_ACCOUNT_TOKEN"
 )
 
+// Errors returned by the 1Password Service Accounts backend.
 var (
-	OPSrvAccountErrClient    = errors.New("Unable to create a 1Password Service Accounts client")
-	OPSrvAccountErrKeyring   = errors.New("Unable to create a 1Password Service Accounts keyring")
+	OPSrvAccountErrClient    = errors.New("unable to create a 1Password Service Accounts client")
+	OPSrvAccountErrKeyring   = errors.New("unable to create a 1Password Service Accounts keyring")
 	OPSrvAccountErrNewClient = fmt.Errorf(
 		"%w: onepassword.NewClient returned an error",
 		OPSrvAccountErrClient,

@@ -1,4 +1,5 @@
 //go:build ios && cgo
+
 // NOTE: Due to newer versions of Go's crypto library requiring SecTrustCopyCertificateChain,
 // this requires iOS 15.0 or later.
 
@@ -113,14 +114,14 @@ func (k *keychain) updateItem(kcItem gokeychain.Item, account string) error {
 
 	results, err := gokeychain.QueryItem(queryItem)
 	if err != nil {
-		return fmt.Errorf("Failed to query keychain: %v", err)
+		return fmt.Errorf("failed to query keychain: %v", err)
 	}
 	if len(results) == 0 {
 		return errors.New("no results")
 	}
 
 	if err := gokeychain.UpdateItem(queryItem, kcItem); err != nil {
-		return fmt.Errorf("Failed to update item in keychain: %v", err)
+		return fmt.Errorf("failed to update item in keychain: %v", err)
 	}
 
 	return nil

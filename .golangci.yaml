@@ -12,7 +12,11 @@ linters:
   exclusions:
     rules:
       - path: _test\.go
-        linters: [dupl, revive, errcheck]
+        linters: [dupl, revive, errcheck, nilnil]
+      # Renaming the existing 1Password error vars (e.g. OPErrClient ->
+      # ErrOPClient) would break the public API, so keep the current names.
+      - linters: [revive, errname, staticcheck]
+        text: 'OP\w*Err\w+'
       - linters: [dupl]
         path: pass(age)?\.go
   enable:

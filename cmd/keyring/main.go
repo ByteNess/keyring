@@ -1,3 +1,4 @@
+// Command keyring is a simple CLI for inspecting keyring backends.
 package main
 
 import (
