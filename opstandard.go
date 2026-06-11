@@ -12,6 +12,7 @@ import (
 	onepassword "github.com/1password/onepassword-sdk-go"
 )
 
+// Integration metadata and item conventions for onepassword-sdk-go based backends.
 const (
 	OPStandardIntegrationName    = "keyring"
 	OPStandardIntegrationVersion = "v1.0.0"
@@ -26,6 +27,7 @@ type OPStandardKeyring struct {
 	Client  OPStandardClientAPI
 }
 
+// GetOPItem returns the 1Password item matching the given key.
 func (k *OPStandardKeyring) GetOPItem(key string) (*onepassword.Item, error) {
 	opItemsAll, err := k.GetOPItems()
 	if err != nil {
@@ -56,6 +58,7 @@ func (k *OPStandardKeyring) GetOPItem(key string) (*onepassword.Item, error) {
 	return &opItems[0], nil
 }
 
+// GetOPItems returns all keyring items from the configured vault.
 func (k *OPStandardKeyring) GetOPItems() ([]onepassword.Item, error) {
 	ctxOuter, cancelOuter := context.WithTimeout(context.Background(), k.Timeout)
 	defer cancelOuter()
@@ -68,7 +71,7 @@ func (k *OPStandardKeyring) GetOPItems() ([]onepassword.Item, error) {
 		),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("Unable to list items from vault with ID %#v: %w", k.VaultID, err)
+		return nil, fmt.Errorf("unable to list items from vault with ID %#v: %w", k.VaultID, err)
 	}
 
 	opItems := []onepassword.Item{}
@@ -85,7 +88,7 @@ func (k *OPStandardKeyring) GetOPItems() ([]onepassword.Item, error) {
 		opItem, err := k.Client.Get(ctxInner, k.VaultID, itemOverview.ID)
 		if err != nil {
 			return nil, fmt.Errorf(
-				"Unable to get item with ID %#v from vault with ID %#v: %w",
+				"unable to get item with ID %#v from vault with ID %#v: %w",
 				itemOverview.ID,
 				k.VaultID,
 				err,
@@ -110,6 +113,7 @@ func (k *OPStandardKeyring) GetOPItems() ([]onepassword.Item, error) {
 	return opItems, nil
 }
 
+// Get returns the Item matching the given key, or ErrKeyNotFound.
 func (k OPStandardKeyring) Get(key string) (Item, error) {
 	opItem, err := k.GetOPItem(key)
 	if err != nil {
@@ -122,10 +126,12 @@ func (k OPStandardKeyring) Get(key string) (Item, error) {
 	return *item, nil
 }
 
-func (k OPStandardKeyring) GetMetadata(key string) (Metadata, error) {
+// GetMetadata returns the non-secret parts of an Item.
+func (k OPStandardKeyring) GetMetadata(_ string) (Metadata, error) {
 	return Metadata{}, nil
 }
 
+// Set creates or updates an Item.
 func (k OPStandardKeyring) Set(item Item) error {
 	opItem, err := k.GetOPItem(item.Key)
 	if err != nil && !errors.Is(err, ErrKeyNotFound) {
@@ -157,7 +163,7 @@ func (k OPStandardKeyring) Set(item Item) error {
 		_, err := k.Client.Create(ctx, params)
 		if err != nil {
 			return fmt.Errorf(
-				"Unable to create item with title %#v in vault with ID %#v: %w",
+				"unable to create item with title %#v in vault with ID %#v: %w",
 				opItemTitle,
 				k.VaultID,
 				err,
@@ -175,7 +181,7 @@ func (k OPStandardKeyring) Set(item Item) error {
 	_, err = k.Client.Put(ctx, *opItem)
 	if err != nil {
 		return fmt.Errorf(
-			"Unable to put item with title %#v in vault with ID %#v: %w",
+			"unable to put item with title %#v in vault with ID %#v: %w",
 			opItemTitle,
 			k.VaultID,
 			err,
@@ -184,6 +190,7 @@ func (k OPStandardKeyring) Set(item Item) error {
 	return nil
 }
 
+// Remove deletes the item with the matching key.
 func (k OPStandardKeyring) Remove(key string) error {
 	opItem, err := k.GetOPItem(key)
 	if err != nil {
@@ -195,7 +202,7 @@ func (k OPStandardKeyring) Remove(key string) error {
 
 	if err := k.Client.Delete(ctx, k.VaultID, opItem.ID); err != nil {
 		return fmt.Errorf(
-			"Unable to delete item with ID %#v in vault with ID %#v: %w",
+			"unable to delete item with ID %#v in vault with ID %#v: %w",
 			opItem.ID,
 			k.VaultID,
 			err,
@@ -204,6 +211,7 @@ func (k OPStandardKeyring) Remove(key string) error {
 	return nil
 }
 
+// Keys returns a slice of all keys stored on the keyring.
 func (k OPStandardKeyring) Keys() ([]string, error) {
 	opItems, err := k.GetOPItems()
 	if err != nil {
@@ -231,6 +239,8 @@ func (k OPStandardKeyring) Keys() ([]string, error) {
 	return keys, nil
 }
 
+// OPStandardClientAPI is the subset of the onepassword-sdk-go items client
+// used by these backends.
 type OPStandardClientAPI interface {
 	Create(ctx context.Context, params onepassword.ItemCreateParams) (onepassword.Item, error)
 	Delete(ctx context.Context, vaultID string, itemID string) error

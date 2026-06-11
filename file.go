@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	jose "github.com/dvsekhvalnov/jose2go"
 	"github.com/byteness/percent"
+	jose "github.com/dvsekhvalnov/jose2go"
 )
 
 func init() {
@@ -35,7 +35,7 @@ type fileKeyring struct {
 
 func (k *fileKeyring) resolveDir() (string, error) {
 	if k.dir == "" {
-		return "", fmt.Errorf("No directory provided for file keyring")
+		return "", fmt.Errorf("no directory provided for file keyring")
 	}
 
 	dir, err := ExpandTilde(k.dir)

@@ -14,6 +14,7 @@ import (
 	onepassword "github.com/1password/onepassword-sdk-go"
 )
 
+// Environment variable names and item conventions for the 1Password Connect backend.
 const (
 	OPConnectEnvHost       = "OP_CONNECT_HOST"
 	OPConnectEnvToken      = "OP_CONNECT_TOKEN"
@@ -21,6 +22,7 @@ const (
 	OPConnectItemFieldType = connectop.FieldTypeConcealed
 )
 
+// Errors returned by the 1Password Connect backend.
 var (
 	OPConnectErrHost = fmt.Errorf(
 		"%w: %w: %#v",
@@ -28,7 +30,7 @@ var (
 		ErrEnvUnsetOrEmpty,
 		OPConnectEnvHost,
 	)
-	OPConnectErrKeyring = errors.New("Unable to create a 1Password Connect keyring")
+	OPConnectErrKeyring = errors.New("unable to create a 1Password Connect keyring")
 )
 
 func init() {
@@ -41,12 +43,14 @@ func init() {
 	})
 }
 
+// OPConnectKeyring implements the Keyring interface for 1Password Connect.
 type OPConnectKeyring struct {
 	OPBaseKeyring
 	Host   string
 	Client OPConnectClientAPI
 }
 
+// NewOPConnectKeyring creates a new 1Password Connect keyring.
 func NewOPConnectKeyring(cfg *Config) (*OPConnectKeyring, error) {
 	errs := []error{}
 
@@ -100,6 +104,7 @@ func NewOPConnectKeyring(cfg *Config) (*OPConnectKeyring, error) {
 	return keyring, nil
 }
 
+// InitializeOPConnectClient initializes the 1Password Connect client if needed.
 func (k *OPConnectKeyring) InitializeOPConnectClient() error {
 	if k.Client != nil {
 		return nil
@@ -115,13 +120,14 @@ func (k *OPConnectKeyring) InitializeOPConnectClient() error {
 	return nil
 }
 
+// GetOPItem returns the 1Password item matching the given key.
 func (k *OPConnectKeyring) GetOPItem(key string) (*onepassword.Item, error) {
 	opItemTitle := k.GetOPItemTitleFromKey(key)
 
 	opConnectItemOverviews, err := k.Client.GetItemsByTitle(opItemTitle, k.VaultID)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"Unable to get item overviews with title %#v from vault with ID %#v: %w",
+			"unable to get item overviews with title %#v from vault with ID %#v: %w",
 			opItemTitle,
 			k.VaultID,
 			err,
@@ -149,6 +155,8 @@ func (k *OPConnectKeyring) GetOPItem(key string) (*onepassword.Item, error) {
 	return &opItems[0], nil
 }
 
+// PruneAndHydrateOPItemOverviews filters item overviews down to keyring items
+// and fetches their full contents.
 func (k *OPConnectKeyring) PruneAndHydrateOPItemOverviews(
 	opConnectItemOverviews []connectop.Item,
 ) ([]onepassword.Item, error) {
@@ -162,7 +170,7 @@ func (k *OPConnectKeyring) PruneAndHydrateOPItemOverviews(
 		opConnectItem, err := k.Client.GetItemByUUID(opConnectItemOverview.ID, k.VaultID)
 		if err != nil {
 			return nil, fmt.Errorf(
-				"Unable to get item with ID %#v from vault with ID %#v: %w",
+				"unable to get item with ID %#v from vault with ID %#v: %w",
 				opConnectItemOverview.ID,
 				k.VaultID,
 				err,
@@ -199,6 +207,7 @@ func (k *OPConnectKeyring) PruneAndHydrateOPItemOverviews(
 	return opItems, nil
 }
 
+// Get returns the Item matching the given key, or ErrKeyNotFound.
 func (k OPConnectKeyring) Get(key string) (Item, error) {
 	if err := k.InitializeOPConnectClient(); err != nil {
 		return Item{}, err
@@ -215,10 +224,12 @@ func (k OPConnectKeyring) Get(key string) (Item, error) {
 	return *item, nil
 }
 
-func (k OPConnectKeyring) GetMetadata(key string) (Metadata, error) {
+// GetMetadata returns the non-secret parts of an Item.
+func (k OPConnectKeyring) GetMetadata(_ string) (Metadata, error) {
 	return Metadata{}, nil
 }
 
+// Set creates or updates an Item.
 func (k OPConnectKeyring) Set(item Item) error {
 	if err := k.InitializeOPConnectClient(); err != nil {
 		return err
@@ -251,7 +262,7 @@ func (k OPConnectKeyring) Set(item Item) error {
 		_, err := k.Client.CreateItem(opConnectItem, k.VaultID)
 		if err != nil {
 			return fmt.Errorf(
-				"Unable to create item with title %#v in vault with ID %#v: %w",
+				"unable to create item with title %#v in vault with ID %#v: %w",
 				opItemTitle,
 				k.VaultID,
 				err,
@@ -267,7 +278,7 @@ func (k OPConnectKeyring) Set(item Item) error {
 	_, err = k.Client.UpdateItem(opConnectItem, k.VaultID)
 	if err != nil {
 		return fmt.Errorf(
-			"Unable to update item with title %#v in vault with ID %#v: %w",
+			"unable to update item with title %#v in vault with ID %#v: %w",
 			opItemTitle,
 			k.VaultID,
 			err,
@@ -276,6 +287,7 @@ func (k OPConnectKeyring) Set(item Item) error {
 	return nil
 }
 
+// Remove deletes the item with the matching key.
 func (k OPConnectKeyring) Remove(key string) error {
 	if err := k.InitializeOPConnectClient(); err != nil {
 		return err
@@ -288,7 +300,7 @@ func (k OPConnectKeyring) Remove(key string) error {
 
 	if err := k.Client.DeleteItemByID(opItem.ID, k.VaultID); err != nil {
 		return fmt.Errorf(
-			"Unable to delete item with ID %#v in vault with ID %#v: %w",
+			"unable to delete item with ID %#v in vault with ID %#v: %w",
 			opItem.ID,
 			k.VaultID,
 			err,
@@ -297,11 +309,12 @@ func (k OPConnectKeyring) Remove(key string) error {
 	return nil
 }
 
+// GetOPItems returns all keyring items from the configured vault.
 func (k *OPConnectKeyring) GetOPItems() ([]onepassword.Item, error) {
 	opItemOverviews, err := k.Client.GetItems(k.VaultID)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"Unable to get item overviews from vault with ID %#v: %w",
+			"unable to get item overviews from vault with ID %#v: %w",
 			k.VaultID,
 			err,
 		)
@@ -315,6 +328,7 @@ func (k *OPConnectKeyring) GetOPItems() ([]onepassword.Item, error) {
 	return opItems, nil
 }
 
+// Keys returns a slice of all keys stored on the keyring.
 func (k OPConnectKeyring) Keys() ([]string, error) {
 	if err := k.InitializeOPConnectClient(); err != nil {
 		return nil, err
@@ -346,6 +360,7 @@ func (k OPConnectKeyring) Keys() ([]string, error) {
 	return keys, nil
 }
 
+// OPConnectClientAPI is the subset of the 1Password Connect client used by this backend.
 type OPConnectClientAPI interface {
 	CreateItem(item *connectop.Item, vaultQuery string) (*connectop.Item, error)
 	DeleteItemByID(itemUUID string, vaultQuery string) error

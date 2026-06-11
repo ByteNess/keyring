@@ -8,7 +8,6 @@ import (
 	"math/rand"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/byteness/keyring"
 	"golang.org/x/sys/unix"
@@ -22,8 +21,6 @@ const ringparent = "thread"
 
 func getRandomKeyringName(length int) string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-
-	rand.Seed(time.Now().UnixNano())
 
 	buf := make([]byte, length)
 	for i := range buf {

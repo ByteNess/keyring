@@ -30,11 +30,11 @@ jobs:
           go-version: 'stable'
           #go-version-file: 'go.mod'
           check-latest: true
-      - name: Lint
-        run: |
-          #golint ./...
-          go vet -all ./...
-      #- name: golangci-lint
-      #  uses: golangci/golangci-lint-action@v8
-      #  with:
-      #    version: v2.1
+      #- name: vet
+      #  run: |
+      #    #golint ./...
+      #    go vet -all ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: 'latest'

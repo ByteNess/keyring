@@ -3,6 +3,7 @@
 package keyring
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,7 +47,7 @@ func init() {
 		// fail if the pass program is not available
 		_, err = exec.LookPath(passage.passcmd)
 		if err != nil {
-			return nil, errors.New("The passage program is not available")
+			return nil, errors.New("the passage program is not available")
 		}
 
 		return passage, nil
@@ -60,7 +61,7 @@ type passageKeyring struct {
 }
 
 func (k *passageKeyring) pass(args ...string) *exec.Cmd {
-	cmd := exec.Command(k.passcmd, args...)
+	cmd := exec.CommandContext(context.Background(), k.passcmd, args...)
 	if k.dir != "" {
 		cmd.Env = append(os.Environ(), fmt.Sprintf("PASSAGE_DIR=%s", k.dir))
 	}
@@ -87,7 +88,7 @@ func (k *passageKeyring) Get(key string) (Item, error) {
 	return decoded, err
 }
 
-func (k *passageKeyring) GetMetadata(key string) (Metadata, error) {
+func (k *passageKeyring) GetMetadata(_ string) (Metadata, error) {
 	return Metadata{}, nil
 }
 

@@ -9,7 +9,7 @@ import (
 	"os"
 
 	gokeychain "github.com/byteness/go-keychain"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 
 	"github.com/noamcohen97/touchid-go"
 )
@@ -138,7 +138,7 @@ func (k *keychain) GetMetadata(key string) (Metadata, error) {
 		ModificationTime: results[0].ModificationDate,
 	}
 
-	debugf("Found metadata for %q", md.Item.Label)
+	debugf("Found metadata for %q", md.Label)
 
 	return md, nil
 }
@@ -157,7 +157,7 @@ func (k *keychain) updateItem(kc gokeychain.Keychain, kcItem gokeychain.Item, ac
 
 	results, err := gokeychain.QueryItem(queryItem)
 	if err != nil {
-		return fmt.Errorf("Failed to query keychain: %v", err)
+		return fmt.Errorf("failed to query keychain: %v", err)
 	}
 	if len(results) == 0 {
 		return errors.New("no results")
@@ -167,7 +167,7 @@ func (k *keychain) updateItem(kc gokeychain.Keychain, kcItem gokeychain.Item, ac
 	kcItem.SetAccess(nil)
 
 	if err := gokeychain.UpdateItem(queryItem, kcItem); err != nil {
-		return fmt.Errorf("Failed to update item in keychain: %v", err)
+		return fmt.Errorf("failed to update item in keychain: %v", err)
 	}
 
 	return nil
@@ -360,17 +360,15 @@ func (k *keychain) openWithTouchID() (gokeychain.Keychain, error) {
 		return gokeychain.Keychain{}, fmt.Errorf("failed to query keychain: %v", err)
 	}
 
-	var passphrase string
 	if len(results) != 1 {
-		// touch ID was never set up, let's do it now
-		var err error
-		passphrase, err = k.setupTouchID()
-		if err != nil {
+		// touch ID was never set up, let's do it now; setupTouchID unlocks the
+		// keychain as part of storing the passphrase
+		if _, err := k.setupTouchID(); err != nil {
 			return gokeychain.Keychain{}, fmt.Errorf("failed to setup touchid: %v", err)
 		}
 	} else {
 		debugf("found password in login.keychain, unlocking %s with stored password", k.path)
-		passphrase = string(results[0].Data)
+		passphrase := string(results[0].Data)
 
 		// try unlocking with the passphrase we found
 		if err := gokeychain.UnlockAtPath(k.path, passphrase); err != nil {
@@ -390,7 +388,7 @@ func (k *keychain) setupTouchID() (string, error) {
 	if k.passwordFunc == nil {
 		debugf("Creating keychain %s with prompt", k.path)
 		fmt.Printf("Password for %q: ", k.path)
-		passphraseBytes, err := terminal.ReadPassword(int(os.Stdin.Fd()))
+		passphraseBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 		if err != nil {
 			return "", fmt.Errorf("failed to read password: %v", err)
 		}

@@ -1,6 +1,7 @@
 //go:build windows
 // +build windows
 
+// Package winhello implements a keyring backend backed by Windows Hello.
 package winhello
 
 import (
@@ -8,7 +9,8 @@ import (
 	"fmt"
 )
 
-var ErrKeyNotFound = errors.New("The specified item could not be found in the keyring")
+// ErrKeyNotFound is returned by Get when the item is not on the keyring.
+var ErrKeyNotFound = errors.New("the specified item could not be found in the keyring")
 
 const passportDefaultLogicalName = "keyring-winhello-v1"
 
@@ -24,6 +26,8 @@ var (
 	}
 )
 
+// Backend stores items in the Windows Credential Manager, encrypted with a
+// Windows Hello protected key.
 type Backend struct {
 	serviceName string
 	store       *winHelloWinCredStore
@@ -32,6 +36,7 @@ type Backend struct {
 	keyName     string
 }
 
+// New creates a new Windows Hello backend for the given service name.
 func New(serviceName string) (*Backend, error) {
 	logicalName := passportLogicalNameFunc()
 	keyName, err := winHelloPassportKeyName(logicalName)
@@ -49,6 +54,7 @@ func New(serviceName string) (*Backend, error) {
 	}, nil
 }
 
+// Get returns the decrypted data for the given key, or ErrKeyNotFound.
 func (b *Backend) Get(key string) ([]byte, error) {
 	encoded, err := b.store.Read(key)
 	if err != nil {
@@ -74,6 +80,7 @@ func (b *Backend) Get(key string) ([]byte, error) {
 	return plaintext, nil
 }
 
+// Set encrypts and stores data under the given key.
 func (b *Backend) Set(key string, data []byte) error {
 	wrapper, err := b.ensureWrapper()
 	if err != nil {
@@ -92,6 +99,7 @@ func (b *Backend) Set(key string, data []byte) error {
 	return nil
 }
 
+// Remove deletes the item with the matching key.
 func (b *Backend) Remove(key string) error {
 	if err := b.store.Delete(key); err != nil {
 		return fmt.Errorf("remove winhello item %q: %w", key, err)
@@ -100,6 +108,7 @@ func (b *Backend) Remove(key string) error {
 	return nil
 }
 
+// Keys returns a slice of all keys stored on the keyring.
 func (b *Backend) Keys() ([]string, error) {
 	keys, err := b.store.Keys()
 	if err != nil {

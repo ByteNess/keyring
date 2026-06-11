@@ -10,7 +10,7 @@ import (
 
 func runCmd(t *testing.T, cmds ...string) {
 	t.Helper()
-	cmd := exec.Command(cmds[0], cmds[1:]...)
+	cmd := exec.CommandContext(t.Context(), cmds[0], cmds[1:]...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		fmt.Println(cmd)

@@ -8,6 +8,7 @@ import (
 )
 
 func DeepCopy(t *testing.T, src, dst any) {
+	t.Helper()
 	data, err := json.Marshal(src)
 	if err != nil {
 		t.Fatal(err)
@@ -18,6 +19,7 @@ func DeepCopy(t *testing.T, src, dst any) {
 }
 
 func NewOPItemFieldValue(t *testing.T, key string, data []byte) string {
+	t.Helper()
 	item := Item{
 		Key:  key,
 		Data: data,

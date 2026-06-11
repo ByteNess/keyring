@@ -685,7 +685,7 @@ func TestWinHelloSilentUnwrapFails(t *testing.T) {
 		t.Fatalf("WrapKey() failed: %v", err)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestWinHelloSilentUnwrapFails$", "-test.v")
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestWinHelloSilentUnwrapFails$", "-test.v")
 	cmd.Env = append(
 		os.Environ(),
 		winHelloSilentUnwrapChildEnv+"=1",

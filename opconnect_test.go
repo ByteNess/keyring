@@ -542,6 +542,7 @@ func NewOPConnectKeyringMock_GetItem(
 	key string,
 	opItemsExisting []connectop.Item,
 ) *MockOPConnectClientAPI {
+	t.Helper()
 	opClientMock := NewMockOPConnectClientAPI(t)
 	keyring.Client = opClientMock
 
@@ -549,7 +550,7 @@ func NewOPConnectKeyringMock_GetItem(
 
 	opClientMock.On("GetItemsByTitle", opItemTitle, keyring.VaultID).Return(
 		func(opItemTitle string, _ string) ([]connectop.Item, error) {
-			opItemOverviews := []connectop.Item{}
+			opItemOverviews := make([]connectop.Item, 0, len(opItemsExisting))
 			for _, opItem := range opItemsExisting {
 				if opItem.Title == opItemTitle {
 					var opItemOverview connectop.Item
@@ -589,6 +590,7 @@ func NewOPConnectKeyringMock_SetItem(
 	opItemsExisting []connectop.Item,
 	opItemSet *connectop.Item,
 ) *MockOPConnectClientAPI {
+	t.Helper()
 	opClientMock := NewOPConnectKeyringMock_GetItem(t, keyring, key, opItemsExisting)
 
 	matchedByOpItem := mock.MatchedBy(func(*connectop.Item) bool { return true })
@@ -621,6 +623,7 @@ func NewOPConnectKeyringMock_RemoveItem(
 	opItemsExisting []connectop.Item,
 	opItemIDRemoved *string,
 ) *MockOPConnectClientAPI {
+	t.Helper()
 	opClientMock := NewOPConnectKeyringMock_GetItem(t, keyring, key, opItemsExisting)
 
 	matchedByString := mock.MatchedBy(func(string) bool { return true })
@@ -644,12 +647,13 @@ func newOPConnectKeyringMock_GetKeys(
 	keyring *OPConnectKeyring,
 	opItemsExisting []connectop.Item,
 ) *MockOPConnectClientAPI {
+	t.Helper()
 	opClientMock := NewMockOPConnectClientAPI(t)
 	keyring.Client = opClientMock
 
 	opClientMock.On("GetItems", keyring.VaultID).Return(
 		func(_ string) ([]connectop.Item, error) {
-			opItemOverviews := []connectop.Item{}
+			opItemOverviews := make([]connectop.Item, 0, len(opItemsExisting))
 			for _, opItem := range opItemsExisting {
 				var opItemOverview connectop.Item
 				DeepCopy(t, &opItem, &opItemOverview)

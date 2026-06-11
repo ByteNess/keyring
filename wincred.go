@@ -11,7 +11,7 @@ import (
 )
 
 // ERROR_NOT_FOUND from https://docs.microsoft.com/en-us/windows/win32/debug/system-error-codes--1000-1299-
-const elementNotFoundError = syscall.Errno(1168)
+const errElementNotFound = syscall.Errno(1168)
 
 type windowsKeyring struct {
 	name   string
@@ -40,7 +40,7 @@ func init() {
 func (k *windowsKeyring) Get(key string) (Item, error) {
 	cred, err := wincred.GetGenericCredential(k.credentialName(key))
 	if err != nil {
-		if err == elementNotFoundError {
+		if err == errElementNotFound {
 			return Item{}, ErrKeyNotFound
 		}
 		return Item{}, err
@@ -70,7 +70,7 @@ func (k *windowsKeyring) Set(item Item) error {
 func (k *windowsKeyring) Remove(key string) error {
 	cred, err := wincred.GetGenericCredential(k.credentialName(key))
 	if err != nil {
-		if err == elementNotFoundError {
+		if err == errElementNotFound {
 			return ErrKeyNotFound
 		}
 		return err
