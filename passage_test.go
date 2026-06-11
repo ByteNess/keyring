@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// we use runCmd defined in cmdtestutil_test.go
 func passageSetup(t *testing.T) (*passageKeyring, func(t *testing.T)) {
 	t.Helper()
 
