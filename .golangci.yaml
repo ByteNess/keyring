@@ -1,0 +1,46 @@
+version: "2"
+linters:
+  settings:
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          files:
+            - $all
+          allow:
+            - $gostd
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [dupl, revive, errcheck]
+      - linters: [dupl]
+        path: pass(age)?\.go
+  enable:
+    - bodyclose
+    - contextcheck
+    - depguard
+    - durationcheck
+    - dupl
+    - errchkjson
+    - errname
+    - exhaustive
+    - gocritic
+    - makezero
+    - misspell
+    - nakedret
+    - nilerr
+    - nilnil
+    - noctx
+    - govet
+    - predeclared
+    - prealloc
+    - revive
+    - thelper
+    - tparallel
+    - unconvert
+    - unparam
+    - whitespace
+formatters:
+  enable:
+    - gofmt
+    - goimports

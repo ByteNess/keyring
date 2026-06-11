@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	jose "github.com/dvsekhvalnov/jose2go"
 	"github.com/byteness/percent"
+	jose "github.com/dvsekhvalnov/jose2go"
 )
 
 func init() {
