@@ -1,28 +1,14 @@
-//go:build !windows
-// +build !windows
+//go:build !windows && !keyring_nopass
 
 package keyring
 
 import (
 	"bytes"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
 )
-
-func runCmd(t *testing.T, cmds ...string) {
-	t.Helper()
-	cmd := exec.Command(cmds[0], cmds[1:]...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		fmt.Println(cmd)
-		fmt.Println(string(out))
-		t.Fatal(err)
-	}
-}
 
 func setup(t *testing.T) (*passKeyring, func(t *testing.T)) {
 	t.Helper()
