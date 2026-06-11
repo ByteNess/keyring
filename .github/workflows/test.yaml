@@ -58,3 +58,28 @@ jobs:
           go-version-file: 'go.mod'
           check-latest: true
       - run: go test -race ./...
+
+  # The default build above and the all-tags build below bracket every tag
+  # combination: each opt-out tag only removes whole files, and no gated file
+  # references a symbol from a different tag group.
+  opt-out-tags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+          check-latest: true
+      - run: go build -tags keyring_no1password,keyring_nofile,keyring_nopass,keyring_nopassage ./...
+      - run: go vet -all -tags keyring_no1password,keyring_nofile,keyring_nopass,keyring_nopassage ./...
+      - run: go test -race -run 'TestOptOutTagsExcludeBackends' -tags keyring_no1password,keyring_nofile,keyring_nopass,keyring_nopassage ./...
+      # Each tag alone must also compile (sources and tests): a reference
+      # between two tag groups' files would pass both the default and
+      # all-tags builds above and break only single-tag consumers.
+      - name: per-tag compile checks
+        run: |
+          for t in keyring_no1password keyring_nofile keyring_nopass keyring_nopassage; do
+            go build -tags "$t" ./...
+            go vet -all -tags "$t" ./...
+            go test -run '^$' -tags "$t" ./...
+          done

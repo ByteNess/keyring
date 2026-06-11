@@ -2,6 +2,8 @@
 // github.com/vektra/mockery
 // template: testify
 
+//go:build !freebsd && !keyring_no1password
+
 package keyring
 
 import (

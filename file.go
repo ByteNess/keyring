@@ -1,3 +1,5 @@
+//go:build !keyring_nofile
+
 package keyring
 
 import (

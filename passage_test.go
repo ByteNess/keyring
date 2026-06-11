@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !keyring_nopassage
 
 package keyring
 
@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// we use runCmd defined in pass_test.go
 func passageSetup(t *testing.T) (*passageKeyring, func(t *testing.T)) {
 	t.Helper()
 

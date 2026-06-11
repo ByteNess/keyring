@@ -10,6 +10,8 @@ pkgname: '{{.SrcPackageName}}'
 recursive: false
 require-template-schema-exists: true
 template: 'testify'
+template-data:
+  mock-build-tags: '!freebsd && !keyring_no1password'
 template-schema: '{{.Template}}.schema.json'
 packages:
   github.com/byteness/keyring:

@@ -86,6 +86,33 @@ if err != nil {
 
 For more detail on the API please check [the keyring godocs](https://godoc.org/github.com/byteness/keyring)
 
+### Reducing the dependency surface (opt-out build tags)
+
+The cross-platform backends compile into every build, whether or not you use
+them, along with their dependency trees. If you know at build time that you
+don't need a backend, an opt-out build tag excludes it (and its dependencies)
+from compilation:
+
+| Build tag | Backends removed | Headline dependencies dropped |
+|---|---|---|
+| `keyring_no1password` | `op`, `op-connect`, `op-desktop` | `onepassword-sdk-go` (incl. the `wazero` WebAssembly runtime), `connect-sdk-go` (incl. `jaeger-client-go`) |
+| `keyring_nofile` | `file` | `dvsekhvalnov/jose2go` |
+| `keyring_nopass` | `pass` | none (shells out to `pass`) |
+| `keyring_nopassage` | `passage` | none (shells out to `passage`) |
+
+```bash
+go build -tags keyring_no1password ./...
+```
+
+The platform-specific backends (`keychain`, `wincred`, `winhello`,
+`secret-service`, `kwallet`, `keyctl`) are already gated by GOOS constraints
+and need no tags. Default builds (no tags) are unaffected. An excluded backend
+is simply absent from `AvailableBackends()`, and requesting it explicitly
+returns `ErrNoAvailImpl` — the same behavior as a backend that's unavailable
+on the current platform. The `BackendType` constants and `Config` fields are
+always present, so there is no API change under any tag.
+
+
 ## Testing
 
 [Vagrant](https://www.vagrantup.com/) is used to create linux and windows test environments.
