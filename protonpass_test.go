@@ -15,7 +15,8 @@ import (
 type mockProtonAPI struct {
 	auth   func(ctx context.Context, pat string) (*protonpass.Session, error)
 	shares func(ctx context.Context, s *protonpass.Session) ([]protonpass.Share, error)
-	items  func(ctx context.Context, s *protonpass.Session, shareID string) ([]protonpass.ItemRevision, error)
+	items     func(ctx context.Context, s *protonpass.Session, shareID string) ([]protonpass.ItemRevision, error)
+	shareKeys func(ctx context.Context, s *protonpass.Session, shareID string) ([]protonpass.ShareKey, error)
 }
 
 func (m mockProtonAPI) Authenticate(ctx context.Context, pat string) (*protonpass.Session, error) {
@@ -28,6 +29,13 @@ func (m mockProtonAPI) ListShares(ctx context.Context, s *protonpass.Session) ([
 
 func (m mockProtonAPI) ListItems(ctx context.Context, s *protonpass.Session, shareID string) ([]protonpass.ItemRevision, error) {
 	return m.items(ctx, s, shareID)
+}
+
+func (m mockProtonAPI) GetShareKeys(ctx context.Context, s *protonpass.Session, shareID string) ([]protonpass.ShareKey, error) {
+	if m.shareKeys != nil {
+		return m.shareKeys(ctx, s, shareID)
+	}
+	return nil, nil
 }
 
 func TestNewProtonPassKeyring(t *testing.T) {

@@ -211,6 +211,36 @@ func TestListItemsPagination(t *testing.T) {
 	}
 }
 
+func TestGetShareKeys(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /pass/v1/share/{shareID}/key", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.PathValue("shareID"); got != testShareID {
+			t.Errorf("share keys path id = %q, want %q", got, testShareID)
+		}
+		if r.URL.Query().Get("Page") != "0" {
+			t.Errorf("expected Page=0, got %q", r.URL.Query().Get("Page"))
+		}
+		writeJSON(w, map[string]any{
+			"Code": 1000,
+			"ShareKeys": map[string]any{
+				"Total": 1,
+				"Keys": []map[string]any{{
+					"KeyRotation": 1, "Key": "base64-share-key", "UserKeyID": "uk1", "CreateTime": 123,
+				}},
+			},
+		})
+	})
+
+	c := newTestClient(t, mux)
+	keys, err := c.GetShareKeys(context.Background(), &Session{UID: testSessionUID, AccessToken: testAccess}, testShareID)
+	if err != nil {
+		t.Fatalf("GetShareKeys: %v", err)
+	}
+	if len(keys) != 1 || keys[0].KeyRotation != 1 || keys[0].Key != "base64-share-key" || keys[0].UserKeyID != "uk1" {
+		t.Fatalf("unexpected share keys: %+v", keys)
+	}
+}
+
 func TestAuthenticateMalformed(t *testing.T) {
 	tests := []struct {
 		name             string

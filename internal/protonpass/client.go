@@ -46,6 +46,7 @@ type API interface {
 	Authenticate(ctx context.Context, pat string) (*Session, error)
 	ListShares(ctx context.Context, s *Session) ([]Share, error)
 	ListItems(ctx context.Context, s *Session, shareID string) ([]ItemRevision, error)
+	GetShareKeys(ctx context.Context, s *Session, shareID string) ([]ShareKey, error)
 }
 
 // Session is an authenticated Proton session: a UID plus bearer tokens.
@@ -73,6 +74,17 @@ type Share struct {
 	Primary              bool   `json:"Primary"`
 	Shared               bool   `json:"Shared"`
 	CreateTime           int64  `json:"CreateTime"`
+}
+
+// ShareKey is one entry from GET /pass/v1/share/{shareID}/key. Key is the base64
+// share key, OpenPGP-encrypted to the user key named by UserKeyID (password
+// sessions) or delivered via the PAT key (token sessions). Decryption is the
+// backend's job (see crypto.go OpenShareKey).
+type ShareKey struct {
+	KeyRotation int    `json:"KeyRotation"`
+	Key         string `json:"Key"`
+	UserKeyID   string `json:"UserKeyID"`
+	CreateTime  int64  `json:"CreateTime"`
 }
 
 // ItemRevision is one entry from GET /pass/v1/share/{shareID}/item. Content is
@@ -210,6 +222,21 @@ func (c *Client) ListItems(ctx context.Context, s *Session, shareID string) ([]I
 		since = resp.Items.LastToken
 	}
 	return all, nil
+}
+
+// GetShareKeys returns the (still-encrypted) key rotations for a share.
+func (c *Client) GetShareKeys(ctx context.Context, s *Session, shareID string) ([]ShareKey, error) {
+	var resp struct {
+		ShareKeys struct {
+			Keys  []ShareKey `json:"Keys"`
+			Total int        `json:"Total"`
+		} `json:"ShareKeys"`
+	}
+	path := fmt.Sprintf("%s/%s/key?Page=0", pathShares, shareID)
+	if err := c.do(ctx, http.MethodGet, path, nil, s.UID, s.AccessToken, &resp); err != nil {
+		return nil, fmt.Errorf("get share keys for %q: %w", shareID, err)
+	}
+	return resp.ShareKeys.Keys, nil
 }
 
 // do builds and sends one request, applies the Proton headers, checks the
