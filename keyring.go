@@ -25,6 +25,7 @@ const (
 	OPBackend            BackendType = "op"
 	OPConnectBackend     BackendType = "op-connect"
 	OPDesktopBackend     BackendType = "op-desktop"
+	ProtonPassBackend    BackendType = "proton-pass"
 )
 
 // This order makes sure the OS-specific backends
@@ -51,6 +52,8 @@ var backendOrder = []BackendType{
 	OPConnectBackend,
 	OPBackend,
 	OPDesktopBackend,
+	// Proton Pass (after FileBackend: never auto-selected, must be chosen explicitly)
+	ProtonPassBackend,
 }
 
 var supportedBackends = map[BackendType]opener{}
