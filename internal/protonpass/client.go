@@ -1,12 +1,9 @@
-// Package protonpass is a minimal native-Go client for Proton Pass's internal
-// HTTP API, used by the proton-pass keyring backend. It speaks the same wire
-// protocol as the Proton Pass CLI, derived from observed traffic (clean-room):
-//
-//   - PAT -> session exchange (two POSTs), and
-//   - the authenticated read endpoints (list shares/vaults, list items).
-//
-// Payload crypto (vault-key -> item-key -> AES-GCM -> protobuf) is layered on
-// top in the backend; this package handles transport, auth, and JSON only.
+// Package protonpass is a minimal native-Go client for Proton Pass's internal HTTP
+// API, used by the proton-pass keyring backend. It speaks the same wire protocol as
+// the Proton Pass CLI, derived from observed traffic (clean-room): the PAT->session
+// exchange (two POSTs) and the authenticated read endpoints (shares, items, share
+// keys) here in client.go, the symmetric AES-GCM unwrap chain in crypto.go, and the
+// item protobuf parse in proto.go.
 package protonpass
 
 import (
@@ -57,8 +54,8 @@ type Session struct {
 }
 
 // Share is one entry from GET /pass/v1/share (a vault the session can access).
-// Content is the base64 OpenPGP-encrypted vault metadata; decryption is the
-// backend's job.
+// Content is the base64 vault metadata, AES-256-GCM encrypted under the share key
+// (AAD "vaultcontent"); decryption is the backend's job (see OpenVaultContent).
 type Share struct {
 	ShareID              string `json:"ShareID"`
 	VaultID              string `json:"VaultID"`
@@ -76,9 +73,9 @@ type Share struct {
 	CreateTime           int64  `json:"CreateTime"`
 }
 
-// ShareKey is one entry from GET /pass/v1/share/{shareID}/key. Key is the base64
-// share key, OpenPGP-encrypted to the user key named by UserKeyID (password
-// sessions) or delivered via the PAT key (token sessions). Decryption is the
+// ShareKey is one entry from GET /pass/v1/share/{shareID}/key. For a PAT session
+// Key is the base64 share key, AES-256-GCM enveloped with the PAT's "::<key>"
+// (AAD "sharekey"); UserKeyID is unused on the PAT path. Decryption is the
 // backend's job (see crypto.go OpenShareKey).
 type ShareKey struct {
 	KeyRotation int    `json:"KeyRotation"`

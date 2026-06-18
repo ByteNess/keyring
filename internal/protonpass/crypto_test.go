@@ -3,7 +3,6 @@ package protonpass
 import (
 	"bytes"
 	"encoding/base64"
-	"errors"
 	"testing"
 )
 
@@ -41,7 +40,6 @@ func TestAESGCMTagIsAuthenticated(t *testing.T) {
 	if _, err := DecryptAESGCM(key, blob, TagItemKey); err == nil {
 		t.Fatal("decrypt with wrong tag must fail")
 	}
-	// Wrong key must fail.
 	if _, err := DecryptAESGCM(key32(0x03), blob, TagItemContent); err == nil {
 		t.Fatal("decrypt with wrong key must fail")
 	}
@@ -59,8 +57,8 @@ func TestAESGCMInputValidation(t *testing.T) {
 	}
 }
 
-// TestUnwrapChain exercises the share-key -> item-key -> item-content composition
-// (everything below the OpenPGP step), matching how a real item decrypts.
+// TestUnwrapChain exercises the share-key -> item-key -> item-content composition,
+// matching how a real item decrypts.
 func TestUnwrapChain(t *testing.T) {
 	shareKey := key32(0x10)
 	itemKey := key32(0x20)
@@ -92,8 +90,52 @@ func TestUnwrapChain(t *testing.T) {
 	}
 }
 
-func TestOpenShareKeyNotImplemented(t *testing.T) {
-	if _, err := OpenShareKey(ShareKey{}, nil); !errors.Is(err, ErrCryptoNotImplemented) {
-		t.Fatalf("OpenShareKey err = %v, want ErrCryptoNotImplemented", err)
+func TestOpenShareKeyRoundTrip(t *testing.T) {
+	encKey := key32(0xee)   // the PAT "::<key>" enc-key
+	shareKey := key32(0x5a) // the 32-byte share key we expect to recover
+
+	blob, err := EncryptAESGCM(encKey, shareKey, nonce12(), TagShareKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sk := ShareKey{KeyRotation: 1, Key: base64.StdEncoding.EncodeToString(blob)}
+
+	got, err := OpenShareKey(sk, encKey)
+	if err != nil {
+		t.Fatalf("OpenShareKey: %v", err)
+	}
+	if !bytes.Equal(got, shareKey) {
+		t.Fatalf("recovered %x, want %x", got, shareKey)
+	}
+
+	if _, err := OpenShareKey(sk, key32(0x01)); err == nil {
+		t.Fatal("OpenShareKey with wrong enc-key must fail")
+	}
+
+	short, err := EncryptAESGCM(encKey, []byte("not thirty-two bytes"), nonce12(), TagShareKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenShareKey(ShareKey{Key: base64.StdEncoding.EncodeToString(short)}, encKey); err == nil {
+		t.Fatal("OpenShareKey must reject a non-32-byte share key")
+	}
+}
+
+func TestPATKey(t *testing.T) {
+	raw := bytes.Repeat([]byte{0x7f}, aesKeyBytes)
+	pat := "pst_0123456789abcdef::" + base64.RawURLEncoding.EncodeToString(raw)
+
+	got, err := PATKey(pat)
+	if err != nil {
+		t.Fatalf("PATKey: %v", err)
+	}
+	if !bytes.Equal(got, raw) {
+		t.Fatalf("PATKey decoded %x, want %x", got, raw)
+	}
+
+	for _, bad := range []string{"pst_nokey", "pst_tok::", "pst_tok::!!!not base64!!!"} {
+		if _, err := PATKey(bad); err == nil {
+			t.Errorf("PATKey(%q) must fail", bad)
+		}
 	}
 }

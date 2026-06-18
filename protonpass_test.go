@@ -3,18 +3,22 @@
 package keyring
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"slices"
 	"testing"
+
+	"google.golang.org/protobuf/encoding/protowire"
 
 	"github.com/byteness/keyring/internal/protonpass"
 )
 
 // mockProtonAPI is an injectable protonpass.API for backend tests.
 type mockProtonAPI struct {
-	auth   func(ctx context.Context, pat string) (*protonpass.Session, error)
-	shares func(ctx context.Context, s *protonpass.Session) ([]protonpass.Share, error)
+	auth      func(ctx context.Context, pat string) (*protonpass.Session, error)
+	shares    func(ctx context.Context, s *protonpass.Session) ([]protonpass.Share, error)
 	items     func(ctx context.Context, s *protonpass.Session, shareID string) ([]protonpass.ItemRevision, error)
 	shareKeys func(ctx context.Context, s *protonpass.Session, shareID string) ([]protonpass.ShareKey, error)
 }
@@ -129,39 +133,205 @@ func TestProtonPassWriteNotImplemented(t *testing.T) {
 	}
 }
 
-func TestProtonPassKeyringKeysWiring(t *testing.T) {
-	var calls []string
-	k := ProtonPassKeyring{
+// vaultFixture is a fully-encrypted Proton Pass vault (one share-key rotation and a
+// set of items) so backend tests exercise the real symmetric decryption chain:
+// PAT enc-key -> share key -> item key -> content -> protobuf.
+type vaultFixture struct {
+	pat       string
+	shareKeys []protonpass.ShareKey
+	revisions []protonpass.ItemRevision
+}
+
+// encodeItemProto encodes Item{ metadata=1: Metadata{ name=1, note=2 } } the way a
+// real Proton Pass item is laid out (field numbers from item-v1.proto).
+func encodeItemProto(name, note string) []byte {
+	var meta []byte
+	meta = protowire.AppendTag(meta, 1, protowire.BytesType)
+	meta = protowire.AppendBytes(meta, []byte(name))
+	meta = protowire.AppendTag(meta, 2, protowire.BytesType)
+	meta = protowire.AppendBytes(meta, []byte(note))
+
+	var item []byte
+	item = protowire.AppendTag(item, 1, protowire.BytesType)
+	item = protowire.AppendBytes(item, meta)
+	return item
+}
+
+// buildVaultFixture builds the encrypted vault for the given titled notes. The PAT
+// "::<key>" half decodes to the AES enc-key that wraps the share key.
+func buildVaultFixture(t *testing.T, titledNotes map[string]string) vaultFixture {
+	t.Helper()
+	encKey := bytes.Repeat([]byte{0xa7}, 32)
+	pat := "pst_token::" + base64.RawURLEncoding.EncodeToString(encKey)
+	shareKeyRaw := bytes.Repeat([]byte{0x5a}, 32)
+
+	var nonceCounter byte
+	seal := func(key, plain []byte, tag string) string {
+		nonceCounter++
+		nonce := make([]byte, 12)
+		nonce[0] = nonceCounter
+		blob, err := protonpass.EncryptAESGCM(key, plain, nonce, tag)
+		if err != nil {
+			t.Fatalf("seal %q: %v", tag, err)
+		}
+		return base64.StdEncoding.EncodeToString(blob)
+	}
+
+	fx := vaultFixture{
+		pat:       pat,
+		shareKeys: []protonpass.ShareKey{{KeyRotation: 1, Key: seal(encKey, shareKeyRaw, protonpass.TagShareKey)}},
+	}
+
+	id := 0
+	for title, note := range titledNotes {
+		id++
+		itemKeyRaw := bytes.Repeat([]byte{byte(0x30 + id)}, 32)
+		fx.revisions = append(fx.revisions, protonpass.ItemRevision{
+			ItemID:               "item" + title,
+			Revision:             1,
+			KeyRotation:          1,
+			ContentFormatVersion: 6,
+			ItemKey:              seal(shareKeyRaw, itemKeyRaw, protonpass.TagItemKey),
+			Content:              seal(itemKeyRaw, encodeItemProto(title, note), protonpass.TagItemContent),
+		})
+	}
+	return fx
+}
+
+// newFixtureKeyring wires a fixture into a keyring with the given prefix, recording
+// the API call order into calls.
+func newFixtureKeyring(fx vaultFixture, prefix string, calls *[]string) ProtonPassKeyring {
+	record := func(name string) { *calls = append(*calls, name) }
+	return ProtonPassKeyring{
 		Client: mockProtonAPI{
-			auth: func(_ context.Context, pat string) (*protonpass.Session, error) {
-				calls = append(calls, "auth")
-				if pat != "pst_tok::key" {
-					t.Errorf("Authenticate got pat %q, want the full compound PAT", pat)
-				}
+			auth: func(_ context.Context, _ string) (*protonpass.Session, error) {
+				record("auth")
 				return &protonpass.Session{UID: "u", AccessToken: "a"}, nil
 			},
 			shares: func(_ context.Context, _ *protonpass.Session) ([]protonpass.Share, error) {
-				calls = append(calls, "shares")
+				record("shares")
 				return []protonpass.Share{{ShareID: "target"}}, nil
 			},
+			shareKeys: func(_ context.Context, _ *protonpass.Session, _ string) ([]protonpass.ShareKey, error) {
+				record("shareKeys")
+				return fx.shareKeys, nil
+			},
 			items: func(_ context.Context, _ *protonpass.Session, shareID string) ([]protonpass.ItemRevision, error) {
-				calls = append(calls, "items")
+				record("items")
 				if shareID != "target" {
-					t.Errorf("ListItems got shareID %q, want target", shareID)
+					return nil, errors.New("unexpected share id")
 				}
-				return []protonpass.ItemRevision{{ItemID: "i"}}, nil
+				return fx.revisions, nil
 			},
 		},
-		ShareID: "target",
-		pat:     "pst_tok::key",
+		ShareID:         "target",
+		ItemTitlePrefix: prefix,
+		pat:             fx.pat,
+	}
+}
+
+func TestProtonPassKeyringReadPath(t *testing.T) {
+	fx := buildVaultFixture(t, map[string]string{
+		"aws-vault/dev":  `{"AccessKeyID":"AKIADEV"}`,
+		"aws-vault/prod": `{"AccessKeyID":"AKIAPROD"}`,
+		"someone-else":   "not an aws-vault item", // wrong prefix -> filtered out
+	})
+	var calls []string
+	k := newFixtureKeyring(fx, ProtonPassDefaultItemTitlePrefix, &calls)
+
+	keys, err := k.Keys()
+	if err != nil {
+		t.Fatalf("Keys: %v", err)
+	}
+	if want := []string{"dev", "prod"}; !slices.Equal(keys, want) {
+		t.Fatalf("Keys = %v, want %v (sorted, prefix-stripped, foreign items dropped)", keys, want)
+	}
+	wantOrder := []string{"auth", "shares", "shareKeys", "items"}
+	if !slices.Equal(calls, wantOrder) {
+		t.Fatalf("call order = %v, want %v", calls, wantOrder)
 	}
 
-	_, err := k.Keys()
-	if !errors.Is(err, ErrProtonPassNotImplemented) {
-		t.Fatalf("Keys err = %v, want ErrProtonPassNotImplemented", err)
+	got, err := k.Get("prod")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
 	}
-	if got := len(calls); got != 3 || calls[0] != "auth" || calls[1] != "shares" || calls[2] != "items" {
-		t.Fatalf("Keys did not auth->shares->items in order: %v", calls)
+	if string(got.Data) != `{"AccessKeyID":"AKIAPROD"}` || got.Key != "prod" {
+		t.Fatalf("Get(prod) = %+v", got)
+	}
+
+	if _, err := k.Get("missing"); !errors.Is(err, ErrKeyNotFound) {
+		t.Fatalf("Get(missing) err = %v, want ErrKeyNotFound", err)
+	}
+}
+
+func TestProtonPassKeyringReadPathNoPrefix(t *testing.T) {
+	// With an empty prefix every item title is a key verbatim.
+	fx := buildVaultFixture(t, map[string]string{"raw-title": "blob"})
+	var calls []string
+	k := newFixtureKeyring(fx, "", &calls)
+
+	keys, err := k.Keys()
+	if err != nil {
+		t.Fatalf("Keys: %v", err)
+	}
+	if !slices.Equal(keys, []string{"raw-title"}) {
+		t.Fatalf("Keys = %v, want [raw-title]", keys)
+	}
+	got, err := k.Get("raw-title")
+	if err != nil || string(got.Data) != "blob" {
+		t.Fatalf("Get(raw-title) = %+v, %v", got, err)
+	}
+}
+
+func TestProtonPassOpenContent(t *testing.T) {
+	shareKey := bytes.Repeat([]byte{0x5a}, 32)
+	proto := encodeItemProto("title", "blob")
+	seal := func(key, plain []byte, tag string, n byte) string {
+		nonce := make([]byte, 12)
+		nonce[0] = n
+		b, err := protonpass.EncryptAESGCM(key, plain, nonce, tag)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return base64.StdEncoding.EncodeToString(b)
+	}
+	k := ProtonPassKeyring{}
+
+	// Newer item: a per-item key wraps the content.
+	itemKey := bytes.Repeat([]byte{0x31}, 32)
+	withKey := protonpass.ItemRevision{
+		ItemKey: seal(shareKey, itemKey, protonpass.TagItemKey, 1),
+		Content: seal(itemKey, proto, protonpass.TagItemContent, 2),
+	}
+	got, err := k.openContent(shareKey, withKey)
+	if err != nil {
+		t.Fatalf("with item key: %v", err)
+	}
+	if meta, _ := protonpass.ParseItemMetadata(got); meta.Name != "title" || meta.Note != "blob" {
+		t.Fatalf("with item key: %+v", meta)
+	}
+
+	// Older item: no ItemKey, content opened with the share key directly.
+	noKey := protonpass.ItemRevision{Content: seal(shareKey, proto, protonpass.TagItemContent, 3)}
+	gotOld, err := k.openContent(shareKey, noKey)
+	if err != nil {
+		t.Fatalf("no item key: %v", err)
+	}
+	if meta, _ := protonpass.ParseItemMetadata(gotOld); meta.Name != "title" {
+		t.Fatalf("no item key: %+v", meta)
+	}
+}
+
+func TestProtonPassItemTitleRoundTrip(t *testing.T) {
+	k := ProtonPassKeyring{ItemTitlePrefix: "aws-vault"}
+	if got := k.itemTitle("dev"); got != "aws-vault/dev" {
+		t.Errorf("itemTitle = %q", got)
+	}
+	if key, ok := k.keyFromTitle("aws-vault/dev"); !ok || key != "dev" {
+		t.Errorf("keyFromTitle = %q, %v", key, ok)
+	}
+	if _, ok := k.keyFromTitle("other/dev"); ok {
+		t.Error("keyFromTitle must reject a foreign prefix")
 	}
 }
 
@@ -180,7 +350,7 @@ func TestProtonPassKeyringShareNotAccessible(t *testing.T) {
 			},
 		},
 		ShareID: "target",
-		pat:     "pst_x::y",
+		pat:     "pst_x::AAAA",
 	}
 
 	if _, err := k.Keys(); !errors.Is(err, ErrProtonPassShareNotAccessible) {

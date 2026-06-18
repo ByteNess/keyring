@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/byteness/keyring/internal/protonpass"
 )
@@ -27,8 +28,7 @@ const (
 
 // Errors returned by the Proton Pass backend.
 var (
-	// ErrProtonPassNotImplemented marks the read-decrypt and write paths that
-	// land in later phases (Phase 2/3); the auth + listing transport is wired.
+	// ErrProtonPassNotImplemented marks the unimplemented write path (Set/Remove).
 	ErrProtonPassNotImplemented = errors.New("proton-pass backend: operation not yet implemented")
 
 	errProtonPassKeyring   = errors.New("unable to create a Proton Pass keyring")
@@ -102,59 +102,165 @@ func (k ProtonPassKeyring) resolvePAT() (string, error) {
 	return "", ErrProtonPassNoPAT
 }
 
-// authenticate resolves the PAT and exchanges it for a session.
-// Session caching/refresh is Phase 5; for now every operation authenticates.
-func (k ProtonPassKeyring) authenticate(ctx context.Context) (*protonpass.Session, error) {
+// session resolves the PAT, exchanges it for a Proton session, and derives the AES
+// enc-key from the PAT's "::<key>" half. Every operation authenticates afresh; there
+// is no session caching yet.
+func (k ProtonPassKeyring) session(ctx context.Context) (*protonpass.Session, []byte, error) {
 	pat, err := k.resolvePAT()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return k.Client.Authenticate(ctx, pat)
+	encKey, err := protonpass.PATKey(pat)
+	if err != nil {
+		return nil, nil, err
+	}
+	session, err := k.Client.Authenticate(ctx, pat)
+	if err != nil {
+		return nil, nil, err
+	}
+	return session, encKey, nil
 }
 
-// requireShare authenticates and confirms the configured Share ID is accessible.
-func (k ProtonPassKeyring) requireShare(ctx context.Context) (*protonpass.Session, error) {
-	session, err := k.authenticate(ctx)
+// decryptedItem is one aws-vault item recovered from the vault: its key (the title
+// with the namespace prefix stripped) and the stored blob (the item note).
+type decryptedItem struct {
+	key  string
+	note string
+}
+
+// openVault authenticates, verifies the configured Share is accessible, and
+// decrypts every share-key rotation (AES-GCM with the PAT enc-key) into a
+// rotation -> 32-byte share key map.
+func (k ProtonPassKeyring) openVault(ctx context.Context) (*protonpass.Session, map[int][]byte, error) {
+	session, encKey, err := k.session(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	shares, err := k.Client.ListShares(ctx, session)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	accessible := slices.ContainsFunc(shares, func(s protonpass.Share) bool {
-		return s.ShareID == k.ShareID
-	})
-	if !accessible {
-		return nil, ErrProtonPassShareNotAccessible
+	if !slices.ContainsFunc(shares, func(s protonpass.Share) bool { return s.ShareID == k.ShareID }) {
+		return nil, nil, ErrProtonPassShareNotAccessible
 	}
-	return session, nil
+
+	shareKeys, err := k.Client.GetShareKeys(ctx, session, k.ShareID)
+	if err != nil {
+		return nil, nil, err
+	}
+	vaultKeys := make(map[int][]byte, len(shareKeys))
+	for _, sk := range shareKeys {
+		raw, err := protonpass.OpenShareKey(sk, encKey)
+		if err != nil {
+			return nil, nil, fmt.Errorf("open share key (rotation %d): %w", sk.KeyRotation, err)
+		}
+		vaultKeys[sk.KeyRotation] = raw
+	}
+	return session, vaultKeys, nil
 }
 
-// Keys lists the keyring items in the configured vault.
-//
-// The transport (authenticate, verify share access, list items) is wired; turning
-// item titles into keys requires the OpenPGP/AES-GCM unwrap chain, which lands in
-// Phase 2. Until then this validates connectivity and returns
-// ErrProtonPassNotImplemented.
-func (k ProtonPassKeyring) Keys() ([]string, error) {
-	ctx := context.Background()
-	session, err := k.requireShare(ctx)
+// readItems lists the vault's items and decrypts each into its key + note,
+// dropping items whose title does not carry this keyring's namespace prefix.
+func (k ProtonPassKeyring) readItems(ctx context.Context) ([]decryptedItem, error) {
+	session, vaultKeys, err := k.openVault(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := k.Client.ListItems(ctx, session, k.ShareID); err != nil {
+	revisions, err := k.Client.ListItems(ctx, session, k.ShareID)
+	if err != nil {
 		return nil, err
 	}
-	return nil, ErrProtonPassNotImplemented
+
+	var items []decryptedItem
+	for _, rev := range revisions {
+		shareKey, ok := vaultKeys[rev.KeyRotation]
+		if !ok {
+			continue // item encrypted under a rotation we did not fetch
+		}
+		content, err := k.openContent(shareKey, rev)
+		if err != nil {
+			return nil, fmt.Errorf("item %s: %w", rev.ItemID, err)
+		}
+		meta, err := protonpass.ParseItemMetadata(content)
+		if err != nil {
+			return nil, fmt.Errorf("item %s: parse: %w", rev.ItemID, err)
+		}
+		key, ok := k.keyFromTitle(meta.Name)
+		if !ok {
+			continue // not an aws-vault item
+		}
+		items = append(items, decryptedItem{key: key, note: meta.Note})
+	}
+	return items, nil
 }
 
-// Get returns the Item for key. Decryption of item content is Phase 2.
-func (k ProtonPassKeyring) Get(_ string) (Item, error) {
-	if _, err := k.requireShare(context.Background()); err != nil {
+// openContent decrypts one item revision's Content. Newer items wrap a per-item
+// key (ItemKey) with the share key; older items have no ItemKey and their Content
+// is opened with the share key directly.
+func (k ProtonPassKeyring) openContent(shareKey []byte, rev protonpass.ItemRevision) ([]byte, error) {
+	if rev.ItemKey == "" {
+		content, err := protonpass.OpenItemContent(shareKey, rev.Content)
+		if err != nil {
+			return nil, fmt.Errorf("open content: %w", err)
+		}
+		return content, nil
+	}
+	itemKey, err := protonpass.OpenItemKey(shareKey, rev.ItemKey)
+	if err != nil {
+		return nil, fmt.Errorf("open item key: %w", err)
+	}
+	content, err := protonpass.OpenItemContent(itemKey, rev.Content)
+	if err != nil {
+		return nil, fmt.Errorf("open content: %w", err)
+	}
+	return content, nil
+}
+
+// itemTitle maps an aws-vault key to a Proton Pass item title. An empty prefix
+// means the title is the key verbatim.
+func (k ProtonPassKeyring) itemTitle(key string) string {
+	if k.ItemTitlePrefix == "" {
+		return key
+	}
+	return k.ItemTitlePrefix + "/" + key
+}
+
+// keyFromTitle is the inverse of itemTitle: it strips the namespace prefix,
+// reporting false for titles that do not belong to this keyring.
+func (k ProtonPassKeyring) keyFromTitle(title string) (string, bool) {
+	if k.ItemTitlePrefix == "" {
+		return title, true
+	}
+	return strings.CutPrefix(title, k.ItemTitlePrefix+"/")
+}
+
+// Keys lists the aws-vault item keys in the configured vault. Titles live inside
+// the encrypted item content, so this fetches and decrypts every item.
+func (k ProtonPassKeyring) Keys() ([]string, error) {
+	items, err := k.readItems(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(items))
+	for _, it := range items {
+		keys = append(keys, it.key)
+	}
+	slices.Sort(keys)
+	return keys, nil
+}
+
+// Get returns the Item for key, decrypting its stored blob, or ErrKeyNotFound.
+func (k ProtonPassKeyring) Get(key string) (Item, error) {
+	items, err := k.readItems(context.Background())
+	if err != nil {
 		return Item{}, err
 	}
-	return Item{}, ErrProtonPassNotImplemented
+	for _, it := range items {
+		if it.key == key {
+			return Item{Key: key, Data: []byte(it.note)}, nil
+		}
+	}
+	return Item{}, ErrKeyNotFound
 }
 
 // GetMetadata reports that Proton requires credentials even for metadata.
@@ -162,12 +268,12 @@ func (k ProtonPassKeyring) GetMetadata(_ string) (Metadata, error) {
 	return Metadata{}, ErrMetadataNeedsCredentials
 }
 
-// Set creates or updates an item. The write path is Phase 3.
+// Set creates or updates an item; not yet implemented.
 func (k ProtonPassKeyring) Set(_ Item) error {
 	return ErrProtonPassNotImplemented
 }
 
-// Remove deletes the item with the matching key. The write path is Phase 3.
+// Remove deletes the item with the matching key; not yet implemented.
 func (k ProtonPassKeyring) Remove(_ string) error {
 	return ErrProtonPassNotImplemented
 }

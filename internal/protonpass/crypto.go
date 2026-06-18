@@ -6,21 +6,20 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 )
 
-// Proton Pass key hierarchy (re-expressed from Proton's published security model
-// and the WebClients crypto types; clean-room spec, not copied source):
+// Proton Pass PAT read model: the chain is symmetric AES-256-GCM, rooted at the
+// PAT's "::<key>" half. A PAT session uses no OpenPGP and no /core/v4/keys (that
+// endpoint 403s for a PAT).
 //
-//	user OpenPGP key
-//	  └─ decrypts the share/vault key   (GET /pass/v1/share/{id}/key -> base64, OpenPGP-armored to UserKeyID)
-//	       ├─ decrypts the vault Content (AES-256-GCM, AAD "vaultcontent")
-//	       └─ decrypts each item's ItemKey (AES-256-GCM, AAD "itemkey")
-//	            └─ decrypts the item Content (AES-256-GCM, AAD "itemcontent") -> protobuf Item
+//	PAT "::<key>"  --base64url-->  32-byte AES key (encKey)
+//	  └─ opens the share key   (GET /pass/v1/share/{id}/key, AAD "sharekey")
+//	       └─ opens an item's ItemKey   (AAD "itemkey")
+//	            └─ opens the item Content (AAD "itemcontent") -> protobuf Item
 //
-// Every symmetric step is AES-256-GCM with a 12-byte nonce prepended to the
-// ciphertext and a PassEncryptionTag string supplied as additional authenticated
-// data. Those steps are implemented and tested here. The OpenPGP step
-// (OpenShareKey) is Phase 2's remaining work — see its doc comment.
+// Older items carry no ItemKey; their Content opens with the share key directly.
+// Each step prepends a 12-byte nonce and authenticates the PassEncryptionTag as AAD.
 
 // PassEncryptionTag values are AES-GCM associated-data domain separators.
 const (
@@ -32,12 +31,27 @@ const (
 
 const (
 	aesKeyBytes   = 32 // AES-256
-	gcmNonceBytes = 12 // 96-bit GCM nonce, prepended to the ciphertext
+	gcmNonceBytes = 12 // prepended to the ciphertext
 )
 
-// ErrCryptoNotImplemented marks crypto steps still to be implemented (the OpenPGP
-// share-key unwrap and the PAT-specific key delivery).
-var ErrCryptoNotImplemented = errors.New("protonpass crypto: step not yet implemented")
+// PATKey decodes the "::<key>" half of a compound "pst_<token>::<key>" PAT into its
+// raw 32-byte AES-256 key. For a PAT session this key is the symmetric root that
+// opens the share key (see OpenShareKey); it is used directly: no salt, no KDF.
+func PATKey(pat string) ([]byte, error) {
+	i := strings.Index(pat, "::")
+	if i < 0 {
+		return nil, errors.New(`pat: missing "::<key>" half`)
+	}
+	keyPart := pat[i+2:]
+	if keyPart == "" {
+		return nil, errors.New(`pat: empty key after "::"`)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(keyPart)
+	if err != nil {
+		return nil, fmt.Errorf("pat: decode key half: %w", err)
+	}
+	return raw, nil
+}
 
 // DecryptAESGCM opens Proton's symmetric envelope: nonce(12) || ciphertext+tag(16),
 // AES-256-GCM, with tag as additional authenticated data.
@@ -57,8 +71,8 @@ func DecryptAESGCM(key, blob []byte, tag string) ([]byte, error) {
 	return plaintext, nil
 }
 
-// EncryptAESGCM produces nonce || ciphertext+tag. nonce must be 12 bytes (caller
-// supplies a unique one). Used by the write path (Phase 3) and the tests.
+// EncryptAESGCM produces nonce || ciphertext+tag. nonce must be 12 bytes and unique
+// per key.
 func EncryptAESGCM(key, plaintext, nonce []byte, tag string) ([]byte, error) {
 	gcm, err := newGCM(key)
 	if err != nil {
@@ -109,16 +123,21 @@ func OpenVaultContent(shareKey []byte, encContentB64 string) ([]byte, error) {
 	return DecryptAESGCM(shareKey, blob, TagVaultContent)
 }
 
-// OpenShareKey decrypts a share key returned by GET /pass/v1/share/{id}/key.
-//
-// For a password session the key is OpenPGP-encrypted to a user key (identified by
-// UserKeyID), so unwrapping needs gopenpgp plus the decrypted user key. For a
-// Personal Access Token session the user's OpenPGP key is unavailable, so Proton
-// must deliver the share key via the PAT's "::<key>" half instead — the exact
-// mechanism is the open Phase 2 question (resolve from the pass-cli source or a
-// captured /share/{id}/key response, then implement here).
-func OpenShareKey(_ ShareKey, _ []byte) ([]byte, error) {
-	return nil, ErrCryptoNotImplemented
+// OpenShareKey decrypts a share key (an entry from GET /pass/v1/share/{id}/key) into
+// its raw 32-byte AES key, using the PAT enc-key (from PATKey) and AAD "sharekey".
+func OpenShareKey(sk ShareKey, encKey []byte) ([]byte, error) {
+	blob, err := b64decode(sk.Key)
+	if err != nil {
+		return nil, fmt.Errorf("share key: %w", err)
+	}
+	shareKey, err := DecryptAESGCM(encKey, blob, TagShareKey)
+	if err != nil {
+		return nil, fmt.Errorf("share key: %w", err)
+	}
+	if len(shareKey) != aesKeyBytes {
+		return nil, fmt.Errorf("share key: want %d-byte AES key, got %d", aesKeyBytes, len(shareKey))
+	}
+	return shareKey, nil
 }
 
 // b64decode tolerates standard and raw (unpadded) base64 for Proton's blobs.
