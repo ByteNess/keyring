@@ -121,6 +121,73 @@ func TestOpenShareKeyRoundTrip(t *testing.T) {
 	}
 }
 
+func TestNewItemKey(t *testing.T) {
+	a, err := NewItemKey()
+	if err != nil {
+		t.Fatalf("NewItemKey: %v", err)
+	}
+	if len(a) != aesKeyBytes {
+		t.Fatalf("item key len = %d, want %d", len(a), aesKeyBytes)
+	}
+	b, err := NewItemKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(a, b) {
+		t.Fatal("two NewItemKey calls returned identical keys")
+	}
+}
+
+// TestSealChain seals an item the way the write path does (fresh item key wraps
+// content, share key wraps the item key) and opens it back via the read path.
+func TestSealChain(t *testing.T) {
+	shareKey := key32(0x5a)
+	itemKey, err := NewItemKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proto := []byte("serialized-item-protobuf")
+
+	encContent, err := SealItemContent(itemKey, proto)
+	if err != nil {
+		t.Fatalf("SealItemContent: %v", err)
+	}
+	encItemKey, err := SealItemKey(shareKey, itemKey)
+	if err != nil {
+		t.Fatalf("SealItemKey: %v", err)
+	}
+
+	gotItemKey, err := OpenItemKey(shareKey, encItemKey)
+	if err != nil {
+		t.Fatalf("OpenItemKey: %v", err)
+	}
+	if !bytes.Equal(gotItemKey, itemKey) {
+		t.Fatal("OpenItemKey did not recover the sealed item key")
+	}
+	gotContent, err := OpenItemContent(gotItemKey, encContent)
+	if err != nil {
+		t.Fatalf("OpenItemContent: %v", err)
+	}
+	if !bytes.Equal(gotContent, proto) {
+		t.Fatalf("content round-trip mismatch: got %q want %q", gotContent, proto)
+	}
+
+	// A fresh nonce per call means two seals of the same plaintext differ.
+	again, err := SealItemContent(itemKey, proto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again == encContent {
+		t.Fatal("two SealItemContent calls produced identical ciphertext (nonce reuse)")
+	}
+}
+
+func TestSealItemKeyRejectsBadKey(t *testing.T) {
+	if _, err := SealItemKey(key32(0x5a), []byte("not-32-bytes")); err == nil {
+		t.Fatal("SealItemKey must reject a non-32-byte item key")
+	}
+}
+
 func TestPATKey(t *testing.T) {
 	raw := bytes.Repeat([]byte{0x7f}, aesKeyBytes)
 	pat := "pst_0123456789abcdef::" + base64.RawURLEncoding.EncodeToString(raw)

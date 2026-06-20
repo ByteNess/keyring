@@ -3,6 +3,8 @@
 package keyring
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"os"
 	"slices"
@@ -64,5 +66,92 @@ func TestProtonPassIntegration(t *testing.T) {
 
 	if _, err := k.Get("definitely-not-a-real-title-zzz"); !errors.Is(err, ErrKeyNotFound) {
 		t.Fatalf("Get(missing) err = %v, want ErrKeyNotFound", err)
+	}
+}
+
+// TestProtonPassIntegrationWrite round-trips the write path against the real Proton
+// Pass API: create -> Keys -> Get -> update -> Remove. It is the generalized P0.5
+// roundtrip_smoke.
+//
+// DANGER: this CREATES and DELETES items in the configured vault. Run it ONLY
+// against a disposable test account / vault, never a personal one. It is doubly
+// gated: PROTON_PASS_INTEGRATION_WRITE=1 plus a writable PAT. The item key is
+// uniquely randomized and the test removes it (including via t.Cleanup on failure),
+// but a misconfigured share id could still touch real data — point it at a throwaway.
+//
+//	pass-cli personal-access-token access grant --role editor --vault-name "<throwaway>" ...
+//	export PROTON_PASS_INTEGRATION_WRITE=1
+//	export PROTON_PASS_PERSONAL_ACCESS_TOKEN='pst_...::...'
+//	export PROTON_PASS_SHARE_ID='<writable share id>'
+//	go test -run TestProtonPassIntegrationWrite -v ./...
+func TestProtonPassIntegrationWrite(t *testing.T) {
+	if os.Getenv("PROTON_PASS_INTEGRATION_WRITE") != "1" {
+		t.Skip("set PROTON_PASS_INTEGRATION_WRITE=1 (disposable account only) to run the live write round-trip")
+	}
+	pat := os.Getenv(ProtonPassEnvPAT)
+	shareID := os.Getenv(ProtonPassEnvShareID)
+	if pat == "" || shareID == "" {
+		t.Fatalf("need %s and %s set", ProtonPassEnvPAT, ProtonPassEnvShareID)
+	}
+
+	buf := make([]byte, 6)
+	if _, err := rand.Read(buf); err != nil {
+		t.Fatal(err)
+	}
+	key := "it-write-" + hex.EncodeToString(buf)
+
+	k := ProtonPassKeyring{
+		Client:          protonpass.New(os.Getenv(ProtonPassEnvAPIBase)),
+		ShareID:         shareID,
+		ItemTitlePrefix: ProtonPassDefaultItemTitlePrefix,
+		pat:             pat,
+	}
+
+	// Best-effort cleanup even if an assertion fails mid-test.
+	t.Cleanup(func() {
+		if err := k.Remove(key); err != nil && !errors.Is(err, ErrKeyNotFound) {
+			t.Logf("cleanup Remove(%q): %v", key, err)
+		}
+	})
+
+	const blob = `{"AccessKeyID":"AKIAINTEGRATION","SecretAccessKey":"s3cr3t"}`
+	if err := k.Set(Item{Key: key, Data: []byte(blob)}); err != nil {
+		t.Fatalf("Set(create): %v", err)
+	}
+
+	keys, err := k.Keys()
+	if err != nil {
+		t.Fatalf("Keys after create: %v", err)
+	}
+	if !slices.Contains(keys, key) {
+		t.Fatalf("Keys did not include the created key %q; got %v", key, keys)
+	}
+
+	got, err := k.Get(key)
+	if err != nil {
+		t.Fatalf("Get after create: %v", err)
+	}
+	if string(got.Data) != blob {
+		t.Fatalf("Get(%q) = %q, want %q", key, got.Data, blob)
+	}
+
+	// Update in place via a second Set, then confirm the new value.
+	const updated = `{"AccessKeyID":"AKIAUPDATED","SecretAccessKey":"n3w"}`
+	if err := k.Set(Item{Key: key, Data: []byte(updated)}); err != nil {
+		t.Fatalf("Set(update): %v", err)
+	}
+	got, err = k.Get(key)
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	if string(got.Data) != updated {
+		t.Fatalf("Get(%q) after update = %q, want %q", key, got.Data, updated)
+	}
+
+	if err := k.Remove(key); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := k.Get(key); !errors.Is(err, ErrKeyNotFound) {
+		t.Fatalf("Get after Remove err = %v, want ErrKeyNotFound", err)
 	}
 }

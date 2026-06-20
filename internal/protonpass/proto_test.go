@@ -58,6 +58,40 @@ func TestParseItemMetadataEmptyNote(t *testing.T) {
 	}
 }
 
+func TestEncodeItemRoundTrip(t *testing.T) {
+	const title = "aws-vault/prod"
+	const blob = `{"AccessKeyID":"AKIAPROD"}`
+	const uuid = "0123abcd-0000-4000-8000-000000000001"
+
+	raw := EncodeItem(ItemMetadata{Name: title, Note: blob}, uuid)
+
+	got, err := ParseItemMetadata(raw)
+	if err != nil {
+		t.Fatalf("ParseItemMetadata(EncodeItem(...)): %v", err)
+	}
+	if got.Name != title || got.Note != blob {
+		t.Fatalf("round-trip mismatch: %+v", got)
+	}
+
+	// The encoded Item carries metadata.item_uuid (field 3) and a Content oneof
+	// (Item field 2) selecting the empty ItemNote (Content field 2).
+	meta, ok, err := bytesField(raw, fieldItemMetadata)
+	if err != nil || !ok {
+		t.Fatalf("metadata field: ok=%v err=%v", ok, err)
+	}
+	gotUUID, ok, err := bytesField(meta, fieldMetadataItemUUID)
+	if err != nil || !ok || string(gotUUID) != uuid {
+		t.Fatalf("item_uuid = %q ok=%v err=%v, want %q", gotUUID, ok, err, uuid)
+	}
+	content, ok, err := bytesField(raw, fieldItemContent)
+	if err != nil || !ok {
+		t.Fatalf("content field: ok=%v err=%v", ok, err)
+	}
+	if note, ok, err := bytesField(content, fieldContentNote); err != nil || !ok || len(note) != 0 {
+		t.Fatalf("content.note marker: note=%v ok=%v err=%v, want empty present", note, ok, err)
+	}
+}
+
 func TestParseItemMetadataMissing(t *testing.T) {
 	// An Item with no metadata field is an error.
 	var item []byte

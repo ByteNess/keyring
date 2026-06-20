@@ -26,6 +26,11 @@ const (
 	DefaultSDKVersions = "muon@2.5.0"
 	DefaultOriginSDK   = "pass-cli@2.1.4"
 
+	// ItemContentFormatVersion is the item-v1 content format version sent on
+	// create/update. It matches the version the live API currently issues for
+	// items; bump it if the server starts rejecting writes at this version.
+	ItemContentFormatVersion = 6
+
 	pathUnauthSession = "/auth/v4/sessions"
 	pathPATExchange   = "/account/v4/personal-access-token/session"
 	pathShares        = "/pass/v1/share"
@@ -44,6 +49,9 @@ type API interface {
 	ListShares(ctx context.Context, s *Session) ([]Share, error)
 	ListItems(ctx context.Context, s *Session, shareID string) ([]ItemRevision, error)
 	GetShareKeys(ctx context.Context, s *Session, shareID string) ([]ShareKey, error)
+	CreateItem(ctx context.Context, s *Session, shareID string, req CreateItemRequest) (*ItemRevision, error)
+	UpdateItem(ctx context.Context, s *Session, shareID, itemID string, req UpdateItemRequest) (*ItemRevision, error)
+	DeleteItem(ctx context.Context, s *Session, shareID, itemID string, revision int) error
 }
 
 // Session is an authenticated Proton session: a UID plus bearer tokens.
@@ -98,6 +106,39 @@ type ItemRevision struct {
 	CreateTime           int64  `json:"CreateTime"`
 	ModifyTime           int64  `json:"ModifyTime"`
 	RevisionTime         int64  `json:"RevisionTime"`
+}
+
+// CreateItemRequest is the body of POST /pass/v1/share/{shareID}/item. Content is
+// the base64 AES-GCM item ciphertext; ItemKey is the per-item key wrapped to the
+// share key. KeyRotation is the share-key rotation ItemKey is wrapped under.
+type CreateItemRequest struct {
+	KeyRotation          int    `json:"KeyRotation"`
+	ContentFormatVersion int    `json:"ContentFormatVersion"`
+	Content              string `json:"Content"`
+	ItemKey              string `json:"ItemKey"`
+}
+
+// UpdateItemRequest is the body of PUT /pass/v1/share/{shareID}/item/{itemID}. The
+// per-item key is unchanged on update, so only the re-encrypted Content is sent;
+// LastRevision is the revision being replaced (optimistic concurrency).
+type UpdateItemRequest struct {
+	KeyRotation          int    `json:"KeyRotation"`
+	LastRevision         int    `json:"LastRevision"`
+	Content              string `json:"Content"`
+	ContentFormatVersion int    `json:"ContentFormatVersion"`
+}
+
+// itemIDRevision identifies one item revision for trash/delete requests.
+type itemIDRevision struct {
+	ItemID   string `json:"ItemID"`
+	Revision int    `json:"Revision"`
+}
+
+// deleteItemsRequest is the body of DELETE /pass/v1/share/{shareID}/item.
+// SkipTrash=true deletes outright rather than moving to trash first.
+type deleteItemsRequest struct {
+	Items     []itemIDRevision `json:"Items"`
+	SkipTrash bool             `json:"SkipTrash"`
 }
 
 // Client talks to the Proton Pass HTTP API over native net/http (HTTP/2, system
@@ -234,6 +275,50 @@ func (c *Client) GetShareKeys(ctx context.Context, s *Session, shareID string) (
 		return nil, fmt.Errorf("get share keys for %q: %w", shareID, err)
 	}
 	return resp.ShareKeys.Keys, nil
+}
+
+// CreateItem creates a new item in the share and returns its new revision.
+func (c *Client) CreateItem(ctx context.Context, s *Session, shareID string, req CreateItemRequest) (*ItemRevision, error) {
+	if req.ContentFormatVersion == 0 {
+		req.ContentFormatVersion = ItemContentFormatVersion
+	}
+	var resp struct {
+		Item ItemRevision `json:"Item"`
+	}
+	path := fmt.Sprintf("%s/%s/item", pathShares, shareID)
+	if err := c.do(ctx, http.MethodPost, path, req, s.UID, s.AccessToken, &resp); err != nil {
+		return nil, fmt.Errorf("create item in share %q: %w", shareID, err)
+	}
+	return &resp.Item, nil
+}
+
+// UpdateItem replaces an item's content and returns its new revision.
+func (c *Client) UpdateItem(ctx context.Context, s *Session, shareID, itemID string, req UpdateItemRequest) (*ItemRevision, error) {
+	if req.ContentFormatVersion == 0 {
+		req.ContentFormatVersion = ItemContentFormatVersion
+	}
+	var resp struct {
+		Item ItemRevision `json:"Item"`
+	}
+	path := fmt.Sprintf("%s/%s/item/%s", pathShares, shareID, itemID)
+	if err := c.do(ctx, http.MethodPut, path, req, s.UID, s.AccessToken, &resp); err != nil {
+		return nil, fmt.Errorf("update item %q in share %q: %w", itemID, shareID, err)
+	}
+	return &resp.Item, nil
+}
+
+// DeleteItem permanently deletes an item (bypassing trash). revision is the
+// item's current revision for the optimistic-concurrency check.
+func (c *Client) DeleteItem(ctx context.Context, s *Session, shareID, itemID string, revision int) error {
+	body := deleteItemsRequest{
+		Items:     []itemIDRevision{{ItemID: itemID, Revision: revision}},
+		SkipTrash: true,
+	}
+	path := fmt.Sprintf("%s/%s/item", pathShares, shareID)
+	if err := c.do(ctx, http.MethodDelete, path, body, s.UID, s.AccessToken, nil); err != nil {
+		return fmt.Errorf("delete item %q in share %q: %w", itemID, shareID, err)
+	}
+	return nil
 }
 
 // do builds and sends one request, applies the Proton headers, checks the

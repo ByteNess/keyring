@@ -28,9 +28,6 @@ const (
 
 // Errors returned by the Proton Pass backend.
 var (
-	// ErrProtonPassNotImplemented marks the unimplemented write path (Set/Remove).
-	ErrProtonPassNotImplemented = errors.New("proton-pass backend: operation not yet implemented")
-
 	errProtonPassKeyring   = errors.New("unable to create a Proton Pass keyring")
 	ErrProtonPassNoPAT     = fmt.Errorf("%w: %w: %#v or Config.ProtonPassPAT", errProtonPassKeyring, ErrEnvUnsetOrEmpty, ProtonPassEnvPAT)
 	ErrProtonPassNoShareID = fmt.Errorf("%w: %w: %#v or Config.ProtonPassShareID", errProtonPassKeyring, ErrEnvUnsetOrEmpty, ProtonPassEnvShareID)
@@ -122,10 +119,15 @@ func (k ProtonPassKeyring) session(ctx context.Context) (*protonpass.Session, []
 }
 
 // decryptedItem is one aws-vault item recovered from the vault: its key (the title
-// with the namespace prefix stripped) and the stored blob (the item note).
+// with the namespace prefix stripped), the stored blob (the item note), and the
+// identifiers + keys the write path needs to update or delete it in place.
 type decryptedItem struct {
-	key  string
-	note string
+	key         string
+	note        string
+	itemID      string
+	revision    int
+	keyRotation int
+	contentKey  []byte // the AES key Content is sealed under (per-item key, or share key for old items)
 }
 
 // openVault authenticates, verifies the configured Share is accessible, and
@@ -159,16 +161,17 @@ func (k ProtonPassKeyring) openVault(ctx context.Context) (*protonpass.Session, 
 	return session, vaultKeys, nil
 }
 
-// readItems lists the vault's items and decrypts each into its key + note,
-// dropping items whose title does not carry this keyring's namespace prefix.
-func (k ProtonPassKeyring) readItems(ctx context.Context) ([]decryptedItem, error) {
+// loadVault authenticates, decrypts the share keys, then lists and decrypts every
+// aws-vault item into its key, note, and the identifiers + content key the write
+// path needs. Items whose title lacks this keyring's namespace prefix are dropped.
+func (k ProtonPassKeyring) loadVault(ctx context.Context) (*protonpass.Session, map[int][]byte, []decryptedItem, error) {
 	session, vaultKeys, err := k.openVault(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	revisions, err := k.Client.ListItems(ctx, session, k.ShareID)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 
 	var items []decryptedItem
@@ -177,43 +180,57 @@ func (k ProtonPassKeyring) readItems(ctx context.Context) ([]decryptedItem, erro
 		if !ok {
 			continue // item encrypted under a rotation we did not fetch
 		}
-		content, err := k.openContent(shareKey, rev)
+		content, contentKey, err := k.openContent(shareKey, rev)
 		if err != nil {
-			return nil, fmt.Errorf("item %s: %w", rev.ItemID, err)
+			return nil, nil, nil, fmt.Errorf("item %s: %w", rev.ItemID, err)
 		}
 		meta, err := protonpass.ParseItemMetadata(content)
 		if err != nil {
-			return nil, fmt.Errorf("item %s: parse: %w", rev.ItemID, err)
+			return nil, nil, nil, fmt.Errorf("item %s: parse: %w", rev.ItemID, err)
 		}
 		key, ok := k.keyFromTitle(meta.Name)
 		if !ok {
 			continue // not an aws-vault item
 		}
-		items = append(items, decryptedItem{key: key, note: meta.Note})
+		items = append(items, decryptedItem{
+			key:         key,
+			note:        meta.Note,
+			itemID:      rev.ItemID,
+			revision:    rev.Revision,
+			keyRotation: rev.KeyRotation,
+			contentKey:  contentKey,
+		})
 	}
-	return items, nil
+	return session, vaultKeys, items, nil
 }
 
-// openContent decrypts one item revision's Content. Newer items wrap a per-item
-// key (ItemKey) with the share key; older items have no ItemKey and their Content
-// is opened with the share key directly.
-func (k ProtonPassKeyring) openContent(shareKey []byte, rev protonpass.ItemRevision) ([]byte, error) {
+// readItems returns just the decrypted items, for the read-only Keys/Get paths.
+func (k ProtonPassKeyring) readItems(ctx context.Context) ([]decryptedItem, error) {
+	_, _, items, err := k.loadVault(ctx)
+	return items, err
+}
+
+// openContent decrypts one item revision's Content and returns the plaintext plus
+// the key it was sealed under. Newer items wrap a per-item key (ItemKey) with the
+// share key; older items have no ItemKey and their Content is opened with the share
+// key directly. The returned key is what an update must re-encrypt under.
+func (k ProtonPassKeyring) openContent(shareKey []byte, rev protonpass.ItemRevision) (content, contentKey []byte, err error) {
 	if rev.ItemKey == "" {
-		content, err := protonpass.OpenItemContent(shareKey, rev.Content)
+		content, err = protonpass.OpenItemContent(shareKey, rev.Content)
 		if err != nil {
-			return nil, fmt.Errorf("open content: %w", err)
+			return nil, nil, fmt.Errorf("open content: %w", err)
 		}
-		return content, nil
+		return content, shareKey, nil
 	}
 	itemKey, err := protonpass.OpenItemKey(shareKey, rev.ItemKey)
 	if err != nil {
-		return nil, fmt.Errorf("open item key: %w", err)
+		return nil, nil, fmt.Errorf("open item key: %w", err)
 	}
-	content, err := protonpass.OpenItemContent(itemKey, rev.Content)
+	content, err = protonpass.OpenItemContent(itemKey, rev.Content)
 	if err != nil {
-		return nil, fmt.Errorf("open content: %w", err)
+		return nil, nil, fmt.Errorf("open content: %w", err)
 	}
-	return content, nil
+	return content, itemKey, nil
 }
 
 // itemTitle maps an aws-vault key to a Proton Pass item title. An empty prefix
@@ -268,12 +285,97 @@ func (k ProtonPassKeyring) GetMetadata(_ string) (Metadata, error) {
 	return Metadata{}, ErrMetadataNeedsCredentials
 }
 
-// Set creates or updates an item; not yet implemented.
-func (k ProtonPassKeyring) Set(_ Item) error {
-	return ErrProtonPassNotImplemented
+// Set creates or updates the aws-vault item for item.Key. The blob (item.Data) is
+// stored as the item note inside an encrypted item-v1 protobuf. An existing item
+// with the same key is updated in place (re-encrypted under its current per-item
+// key); otherwise a new item is created under the current share-key rotation.
+func (k ProtonPassKeyring) Set(item Item) error {
+	ctx := context.Background()
+	session, vaultKeys, items, err := k.loadVault(ctx)
+	if err != nil {
+		return err
+	}
+
+	uuid, err := protonpass.NewItemUUID()
+	if err != nil {
+		return err
+	}
+	plaintext := protonpass.EncodeItem(
+		protonpass.ItemMetadata{Name: k.itemTitle(item.Key), Note: string(item.Data)}, uuid)
+
+	if existing, ok := findItem(items, item.Key); ok {
+		content, err := protonpass.SealItemContent(existing.contentKey, plaintext)
+		if err != nil {
+			return err
+		}
+		_, err = k.Client.UpdateItem(ctx, session, k.ShareID, existing.itemID, protonpass.UpdateItemRequest{
+			KeyRotation:  existing.keyRotation,
+			LastRevision: existing.revision,
+			Content:      content,
+		})
+		return err
+	}
+
+	rotation, shareKey, ok := currentRotation(vaultKeys)
+	if !ok {
+		return fmt.Errorf("proton-pass backend: no share key available to encrypt %q", item.Key)
+	}
+	itemKey, err := protonpass.NewItemKey()
+	if err != nil {
+		return err
+	}
+	content, err := protonpass.SealItemContent(itemKey, plaintext)
+	if err != nil {
+		return err
+	}
+	wrappedKey, err := protonpass.SealItemKey(shareKey, itemKey)
+	if err != nil {
+		return err
+	}
+	_, err = k.Client.CreateItem(ctx, session, k.ShareID, protonpass.CreateItemRequest{
+		KeyRotation: rotation,
+		Content:     content,
+		ItemKey:     wrappedKey,
+	})
+	return err
 }
 
-// Remove deletes the item with the matching key; not yet implemented.
-func (k ProtonPassKeyring) Remove(_ string) error {
-	return ErrProtonPassNotImplemented
+// Remove permanently deletes the item with the matching key, or returns
+// ErrKeyNotFound if no aws-vault item carries that key.
+func (k ProtonPassKeyring) Remove(key string) error {
+	ctx := context.Background()
+	session, _, items, err := k.loadVault(ctx)
+	if err != nil {
+		return err
+	}
+	existing, ok := findItem(items, key)
+	if !ok {
+		return ErrKeyNotFound
+	}
+	return k.Client.DeleteItem(ctx, session, k.ShareID, existing.itemID, existing.revision)
+}
+
+// findItem returns the decrypted item with the given key.
+func findItem(items []decryptedItem, key string) (decryptedItem, bool) {
+	for _, it := range items {
+		if it.key == key {
+			return it, true
+		}
+	}
+	return decryptedItem{}, false
+}
+
+// currentRotation returns the highest share-key rotation and its key, the rotation
+// a new item is encrypted under. ok is false when no share key is available.
+func currentRotation(vaultKeys map[int][]byte) (rotation int, shareKey []byte, ok bool) {
+	best := -1
+	for rot := range vaultKeys {
+		if rot > best {
+			best = rot
+		}
+	}
+	if best < 0 {
+		return 0, nil, false
+	}
+	return best, vaultKeys[best], true
 }

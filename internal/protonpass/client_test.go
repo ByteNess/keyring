@@ -273,6 +273,119 @@ func TestAuthenticateMalformed(t *testing.T) {
 	}
 }
 
+func TestCreateItem(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /pass/v1/share/{shareID}/item", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.PathValue("shareID"); got != testShareID {
+			t.Errorf("create path share id = %q, want %q", got, testShareID)
+		}
+		if r.Header.Get("Authorization") != "Bearer "+testAccess || r.Header.Get("x-pm-uid") != testSessionUID {
+			t.Errorf("create missing session headers: uid=%q auth=%q", r.Header.Get("x-pm-uid"), r.Header.Get("Authorization"))
+		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Errorf("create Content-Type = %q", r.Header.Get("Content-Type"))
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeJSON(w, map[string]any{"Code": 1000, "Item": map[string]any{
+			"ItemID": "newitem", "Revision": 1, "KeyRotation": 1, "ContentFormatVersion": 6,
+		}})
+	})
+
+	c := newTestClient(t, mux)
+	sess := &Session{UID: testSessionUID, AccessToken: testAccess}
+	rev, err := c.CreateItem(context.Background(), sess, testShareID, CreateItemRequest{
+		KeyRotation: 1, Content: "enc-content", ItemKey: "wrapped-item-key",
+	})
+	if err != nil {
+		t.Fatalf("CreateItem: %v", err)
+	}
+	if rev.ItemID != "newitem" || rev.Revision != 1 {
+		t.Fatalf("create returned %+v, want ItemID=newitem Revision=1", rev)
+	}
+	// ContentFormatVersion defaults to the current version when left zero.
+	if gotBody["ContentFormatVersion"].(float64) != float64(ItemContentFormatVersion) {
+		t.Errorf("create ContentFormatVersion = %v, want default %d", gotBody["ContentFormatVersion"], ItemContentFormatVersion)
+	}
+	if gotBody["Content"] != "enc-content" || gotBody["ItemKey"] != "wrapped-item-key" || gotBody["KeyRotation"].(float64) != 1 {
+		t.Errorf("create body = %v", gotBody)
+	}
+}
+
+func TestUpdateItem(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("PUT /pass/v1/share/{shareID}/item/{itemID}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("shareID") != testShareID || r.PathValue("itemID") != "item1" {
+			t.Errorf("update path = share %q item %q", r.PathValue("shareID"), r.PathValue("itemID"))
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeJSON(w, map[string]any{"Code": 1000, "Item": map[string]any{"ItemID": "item1", "Revision": 4}})
+	})
+
+	c := newTestClient(t, mux)
+	sess := &Session{UID: testSessionUID, AccessToken: testAccess}
+	rev, err := c.UpdateItem(context.Background(), sess, testShareID, "item1", UpdateItemRequest{
+		KeyRotation: 1, LastRevision: 3, Content: "new-enc-content",
+	})
+	if err != nil {
+		t.Fatalf("UpdateItem: %v", err)
+	}
+	if rev.Revision != 4 {
+		t.Fatalf("update returned revision %d, want 4", rev.Revision)
+	}
+	if gotBody["LastRevision"].(float64) != 3 || gotBody["Content"] != "new-enc-content" {
+		t.Errorf("update body = %v", gotBody)
+	}
+	// The per-item key is unchanged on update, so no ItemKey is sent.
+	if _, present := gotBody["ItemKey"]; present {
+		t.Errorf("update must not send ItemKey, body = %v", gotBody)
+	}
+}
+
+func TestDeleteItem(t *testing.T) {
+	var gotBody map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /pass/v1/share/{shareID}/item", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.PathValue("shareID"); got != testShareID {
+			t.Errorf("delete path share id = %q, want %q", got, testShareID)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		writeJSON(w, map[string]any{"Code": 1000})
+	})
+
+	c := newTestClient(t, mux)
+	sess := &Session{UID: testSessionUID, AccessToken: testAccess}
+	if err := c.DeleteItem(context.Background(), sess, testShareID, "item1", 3); err != nil {
+		t.Fatalf("DeleteItem: %v", err)
+	}
+	if gotBody["SkipTrash"] != true {
+		t.Errorf("delete must set SkipTrash=true, body = %v", gotBody)
+	}
+	items, ok := gotBody["Items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("delete Items = %v", gotBody["Items"])
+	}
+	first := items[0].(map[string]any)
+	if first["ItemID"] != "item1" || first["Revision"].(float64) != 3 {
+		t.Errorf("delete item entry = %v, want ItemID=item1 Revision=3", first)
+	}
+}
+
+func TestDeleteItemAPIError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /pass/v1/share/{shareID}/item", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		writeJSON(w, map[string]any{"Code": 2001, "Error": "Item revision is stale"})
+	})
+	c := newTestClient(t, mux)
+	err := c.DeleteItem(context.Background(), &Session{UID: "u", AccessToken: "a"}, testShareID, "item1", 1)
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnprocessableEntity {
+		t.Fatalf("DeleteItem error = %v, want *APIError with 422", err)
+	}
+}
+
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)

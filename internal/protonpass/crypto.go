@@ -3,6 +3,7 @@ package protonpass
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -146,4 +147,64 @@ func b64decode(s string) ([]byte, error) {
 		return b, nil
 	}
 	return base64.RawStdEncoding.DecodeString(s)
+}
+
+// The write path reverses the read chain: a fresh per-item key seals the item
+// content (AAD "itemcontent"), and the share key wraps that item key (AAD
+// "itemkey"). Each seal prepends a fresh random 12-byte nonce.
+
+// NewItemKey returns a fresh random 32-byte AES-256 key for one item.
+func NewItemKey() ([]byte, error) {
+	key := make([]byte, aesKeyBytes)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("generate item key: %w", err)
+	}
+	return key, nil
+}
+
+// NewItemUUID returns a fresh random RFC 4122 v4 UUID string, used for an item's
+// metadata.item_uuid on create.
+func NewItemUUID() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate item uuid: %w", err)
+	}
+	b[6] = (b[6] & 0x0f) | 0x40 // version 4
+	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// seal encrypts plaintext under key with a fresh random nonce, returning
+// nonce(12) || ciphertext+tag(16).
+func seal(key, plaintext []byte, tag string) ([]byte, error) {
+	nonce := make([]byte, gcmNonceBytes)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("generate nonce: %w", err)
+	}
+	return EncryptAESGCM(key, plaintext, nonce, tag)
+}
+
+// SealItemContent encrypts an item's protobuf plaintext under its item key
+// (AAD "itemcontent"), returning the base64 blob for ItemRevision.Content. It
+// is the inverse of OpenItemContent.
+func SealItemContent(itemKey, plaintext []byte) (string, error) {
+	blob, err := seal(itemKey, plaintext, TagItemContent)
+	if err != nil {
+		return "", fmt.Errorf("seal item content: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(blob), nil
+}
+
+// SealItemKey wraps a per-item key with the share key (AAD "itemkey"),
+// returning the base64 blob for ItemRevision.ItemKey. It is the inverse of
+// OpenItemKey.
+func SealItemKey(shareKey, itemKey []byte) (string, error) {
+	if len(itemKey) != aesKeyBytes {
+		return "", fmt.Errorf("seal item key: item key must be %d bytes, got %d", aesKeyBytes, len(itemKey))
+	}
+	blob, err := seal(shareKey, itemKey, TagItemKey)
+	if err != nil {
+		return "", fmt.Errorf("seal item key: %w", err)
+	}
+	return base64.StdEncoding.EncodeToString(blob), nil
 }
