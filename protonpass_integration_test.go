@@ -155,3 +155,62 @@ func TestProtonPassIntegrationWrite(t *testing.T) {
 		t.Fatalf("Get after Remove err = %v, want ErrKeyNotFound", err)
 	}
 }
+
+// TestProtonPassIntegrationUpdateRemove confirms the update + delete path against an
+// EXISTING item. It exists for accounts/PATs where whole-vault grants (needed to
+// create) are not permitted but a per-item editor grant is, so the create-based
+// round-trip above cannot run.
+//
+// DANGER: it OVERWRITES then PERMANENTLY DELETES the named item — point it ONLY at a
+// throwaway item. Gated by PROTON_PASS_INTEGRATION_WRITE=1.
+//
+//	export PROTON_PASS_INTEGRATION_WRITE=1
+//	export PROTON_PASS_PERSONAL_ACCESS_TOKEN='pst_...::...'
+//	export PROTON_PASS_SHARE_ID='<recipient share id from a per-item editor grant>'
+//	export PROTON_PASS_TEST_ITEM_TITLE='<throwaway item title>'
+//	go test -run TestProtonPassIntegrationUpdateRemove -v ./...
+func TestProtonPassIntegrationUpdateRemove(t *testing.T) {
+	if os.Getenv("PROTON_PASS_INTEGRATION_WRITE") != "1" {
+		t.Skip("set PROTON_PASS_INTEGRATION_WRITE=1 (throwaway item only) to run the live update/delete test")
+	}
+	pat := os.Getenv(ProtonPassEnvPAT)
+	shareID := os.Getenv(ProtonPassEnvShareID)
+	title := os.Getenv("PROTON_PASS_TEST_ITEM_TITLE")
+	if pat == "" || shareID == "" || title == "" {
+		t.Fatalf("need %s, %s, and PROTON_PASS_TEST_ITEM_TITLE set", ProtonPassEnvPAT, ProtonPassEnvShareID)
+	}
+
+	// Empty prefix: the item title is the key verbatim.
+	k := ProtonPassKeyring{
+		Client:          protonpass.New(os.Getenv(ProtonPassEnvAPIBase)),
+		ShareID:         shareID,
+		ItemTitlePrefix: "",
+		pat:             pat,
+	}
+
+	// The target item must already exist and be readable (the per-item grant).
+	if _, err := k.Get(title); err != nil {
+		t.Fatalf("Get(%q) before update: %v (is the per-item editor grant in place?)", title, err)
+	}
+
+	// Update in place — exercises Set's update branch (reuses the existing item key).
+	const updated = `{"phase3":"update-confirm"}`
+	if err := k.Set(Item{Key: title, Data: []byte(updated)}); err != nil {
+		t.Fatalf("Set(update) on %q: %v", title, err)
+	}
+	got, err := k.Get(title)
+	if err != nil {
+		t.Fatalf("Get(%q) after update: %v", title, err)
+	}
+	if string(got.Data) != updated {
+		t.Fatalf("Get(%q) after update = %q, want %q", title, got.Data, updated)
+	}
+
+	// Permanent delete.
+	if err := k.Remove(title); err != nil {
+		t.Fatalf("Remove(%q): %v", title, err)
+	}
+	if _, err := k.Get(title); !errors.Is(err, ErrKeyNotFound) {
+		t.Fatalf("Get(%q) after Remove err = %v, want ErrKeyNotFound", title, err)
+	}
+}
