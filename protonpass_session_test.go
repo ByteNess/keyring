@@ -147,6 +147,27 @@ func TestProtonPassOpContextDeadline(t *testing.T) {
 	}
 }
 
+// TestProtonPassLoadVaultDecryptError exercises the post-load error path (an
+// undecryptable item), where loadVaultOnce zeros the decrypted share keys before
+// returning: it must surface the error cleanly and not panic.
+func TestProtonPassLoadVaultDecryptError(t *testing.T) {
+	fx := buildVaultFixture(t, nil) // valid share key (rotation 1), no items
+	m := readMock(fx)
+	m.items = func(context.Context, *protonpass.Session, string) ([]protonpass.ItemRevision, error) {
+		return []protonpass.ItemRevision{{
+			ItemID:      "bad",
+			Revision:    1,
+			KeyRotation: 1,
+			Content:     "not-valid-ciphertext",
+		}}, nil
+	}
+	k := ProtonPassKeyring{Client: *m, ShareID: "target", ItemTitlePrefix: "aws-vault", pat: fx.pat}
+
+	if _, err := k.Keys(); err == nil {
+		t.Fatal("Keys must return an error for an undecryptable item")
+	}
+}
+
 func TestProtonPassTimeoutExcludesPrompt(t *testing.T) {
 	fx := buildVaultFixture(t, nil)
 	const timeout = 30 * time.Second

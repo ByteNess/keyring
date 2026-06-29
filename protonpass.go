@@ -276,33 +276,46 @@ func (k ProtonPassKeyring) openVault(ctx context.Context, session *protonpass.Se
 // and decrypts every aws-vault item into its key, note, and the identifiers +
 // content key the write path needs. Items whose title lacks this keyring's
 // namespace prefix are dropped. forceFresh forces a new PAT exchange.
-func (k ProtonPassKeyring) loadVaultOnce(ctx context.Context, pat string, encKey []byte, forceFresh bool) (*protonpass.Session, map[int][]byte, []decryptedItem, error) {
-	session, err := k.authSession(ctx, pat, forceFresh)
+func (k ProtonPassKeyring) loadVaultOnce(ctx context.Context, pat string, encKey []byte, forceFresh bool) (session *protonpass.Session, vaultKeys map[int][]byte, items []decryptedItem, err error) {
+	session, err = k.authSession(ctx, pat, forceFresh)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	vaultKeys, err := k.openVault(ctx, session, encKey)
+	vaultKeys, err = k.openVault(ctx, session, encKey)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	// Past this point vaultKeys (and any per-item keys decrypted below) hold key
+	// material. If we return an error instead of handing them to the caller, zero
+	// them rather than leaving them for the GC.
+	defer func() {
+		if err != nil {
+			zeroVaultKeys(vaultKeys)
+			zeroItems(items)
+			session, vaultKeys, items = nil, nil, nil
+		}
+	}()
+
 	revisions, err := k.Client.ListItems(ctx, session, k.ShareID)
 	if err != nil {
-		return nil, nil, nil, err
+		return
 	}
 
-	var items []decryptedItem
 	for _, rev := range revisions {
 		shareKey, ok := vaultKeys[rev.KeyRotation]
 		if !ok {
 			continue // item encrypted under a rotation we did not fetch
 		}
-		content, contentKey, err := k.openContent(shareKey, rev)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("item %s: %w", rev.ItemID, err)
+		content, contentKey, cerr := k.openContent(shareKey, rev)
+		if cerr != nil {
+			err = fmt.Errorf("item %s: %w", rev.ItemID, cerr)
+			return
 		}
-		meta, err := protonpass.ParseItemMetadata(content)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("item %s: parse: %w", rev.ItemID, err)
+		meta, perr := protonpass.ParseItemMetadata(content)
+		if perr != nil {
+			zeroBytes(contentKey) // this revision's key is not yet recorded in items
+			err = fmt.Errorf("item %s: parse: %w", rev.ItemID, perr)
+			return
 		}
 		key, ok := k.keyFromTitle(meta.Name)
 		if !ok {
