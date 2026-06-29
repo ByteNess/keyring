@@ -58,6 +58,7 @@ func TestAuthenticate(t *testing.T) {
 		gotExchange = r
 		writeJSON(w, map[string]any{"Code": 1000, "Session": map[string]any{
 			"SessionUID": testSessionUID, "AccessToken": testAccess, "RefreshToken": testRefresh,
+			"AccessExpirationTime": 1893456000,
 		}})
 	})
 
@@ -68,6 +69,9 @@ func TestAuthenticate(t *testing.T) {
 	}
 	if sess.UID != testSessionUID || sess.AccessToken != testAccess || sess.RefreshToken != testRefresh {
 		t.Fatalf("session not mapped from nested Session{SessionUID,...}: %+v", sess)
+	}
+	if sess.AccessExpiry != 1893456000 {
+		t.Fatalf("AccessExpiry = %d, want 1893456000 (mapped from AccessExpirationTime)", sess.AccessExpiry)
 	}
 
 	// the exchange must carry the unauth session creds + correct headers

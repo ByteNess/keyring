@@ -59,6 +59,13 @@ type Session struct {
 	UID          string
 	AccessToken  string
 	RefreshToken string
+
+	// AccessExpiry is the access token's expiry as reported by the exchange.
+	// Proton sends it as AccessExpirationTime; it is treated as Unix seconds
+	// when it looks like a plausible future epoch and ignored otherwise (0 if
+	// absent). The session-cache freshness check, not this client, decides how
+	// to interpret it.
+	AccessExpiry int64
 }
 
 // Share is one entry from GET /pass/v1/share (a vault the session can access).
@@ -204,9 +211,10 @@ func (c *Client) Authenticate(ctx context.Context, pat string) (*Session, error)
 
 	var exch struct {
 		Session struct {
-			SessionUID   string `json:"SessionUID"`
-			AccessToken  string `json:"AccessToken"`
-			RefreshToken string `json:"RefreshToken"`
+			SessionUID           string `json:"SessionUID"`
+			AccessToken          string `json:"AccessToken"`
+			RefreshToken         string `json:"RefreshToken"`
+			AccessExpirationTime int64  `json:"AccessExpirationTime"`
 		} `json:"Session"`
 	}
 	body := map[string]string{"Token": PATToken(pat)}
@@ -220,6 +228,7 @@ func (c *Client) Authenticate(ctx context.Context, pat string) (*Session, error)
 		UID:          exch.Session.SessionUID,
 		AccessToken:  exch.Session.AccessToken,
 		RefreshToken: exch.Session.RefreshToken,
+		AccessExpiry: exch.Session.AccessExpirationTime,
 	}, nil
 }
 
