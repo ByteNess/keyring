@@ -26,6 +26,10 @@ const (
 	ProtonPassEnvAPIBase = "PROTON_PASS_API_BASE"
 	// ProtonPassDefaultItemTitlePrefix namespaces aws-vault's items in the vault.
 	ProtonPassDefaultItemTitlePrefix = "aws-vault"
+
+	// protonPassDefaultTimeout bounds a single backend operation (which may issue
+	// several HTTP calls) when no timeout is configured.
+	protonPassDefaultTimeout = 30 * time.Second
 )
 
 // Errors returned by the Proton Pass backend.
@@ -57,6 +61,7 @@ type ProtonPassKeyring struct {
 
 	apiBase string
 	cache   protonSessionStore
+	timeout time.Duration
 	nowFunc func() time.Time // overridable in tests; nil means time.Now
 }
 
@@ -90,7 +95,18 @@ func NewProtonPassKeyring(cfg *Config) (*ProtonPassKeyring, error) {
 		tokenFunc:       cfg.ProtonPassTokenFunc,
 		apiBase:         apiBase,
 		cache:           newKeychainSessionStore(),
+		timeout:         cfg.ProtonPassTimeout,
 	}, nil
+}
+
+// opContext derives a per-operation context carrying the configured timeout, so
+// every Proton API call an operation makes shares one deadline.
+func (k ProtonPassKeyring) opContext() (context.Context, context.CancelFunc) {
+	timeout := k.timeout
+	if timeout <= 0 {
+		timeout = protonPassDefaultTimeout
+	}
+	return context.WithTimeout(context.Background(), timeout)
 }
 
 // now returns the current time, allowing tests to control session-cache aging.
@@ -313,7 +329,8 @@ func (k ProtonPassKeyring) keyFromTitle(title string) (string, bool) {
 // Keys lists the aws-vault item keys in the configured vault. Titles live inside
 // the encrypted item content, so this fetches and decrypts every item.
 func (k ProtonPassKeyring) Keys() ([]string, error) {
-	ctx := context.Background()
+	ctx, cancel := k.opContext()
+	defer cancel()
 	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return nil, err
@@ -336,7 +353,8 @@ func (k ProtonPassKeyring) Keys() ([]string, error) {
 
 // Get returns the Item for key, decrypting its stored blob, or ErrKeyNotFound.
 func (k ProtonPassKeyring) Get(key string) (Item, error) {
-	ctx := context.Background()
+	ctx, cancel := k.opContext()
+	defer cancel()
 	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return Item{}, err
@@ -372,7 +390,8 @@ func (k ProtonPassKeyring) GetMetadata(_ string) (Metadata, error) {
 // with the same key is updated in place (re-encrypted under its current per-item
 // key); otherwise a new item is created under the current share-key rotation.
 func (k ProtonPassKeyring) Set(item Item) error {
-	ctx := context.Background()
+	ctx, cancel := k.opContext()
+	defer cancel()
 	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return err
@@ -431,7 +450,8 @@ func (k ProtonPassKeyring) setItem(ctx context.Context, session *protonpass.Sess
 // Remove permanently deletes the item with the matching key, or returns
 // ErrKeyNotFound if no aws-vault item carries that key.
 func (k ProtonPassKeyring) Remove(key string) error {
-	ctx := context.Background()
+	ctx, cancel := k.opContext()
+	defer cancel()
 	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return err

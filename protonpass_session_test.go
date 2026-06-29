@@ -4,6 +4,7 @@ package keyring
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -52,6 +53,41 @@ func TestCachedSessionFresh(t *testing.T) {
 				t.Errorf("fresh() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestProtonPassOpContextDeadline(t *testing.T) {
+	k := ProtonPassKeyring{timeout: 5 * time.Second}
+	ctx, cancel := k.opContext()
+	defer cancel()
+	dl, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("opContext returned a context with no deadline")
+	}
+	if d := time.Until(dl); d <= 0 || d > 6*time.Second {
+		t.Fatalf("deadline in %v, want ~5s", d)
+	}
+
+	// A zero timeout falls back to the built-in default.
+	dctx, dcancel := ProtonPassKeyring{}.opContext()
+	defer dcancel()
+	dl2, ok := dctx.Deadline()
+	if !ok || time.Until(dl2) <= 5*time.Second {
+		t.Fatalf("default timeout not applied; ok=%v remaining=%v", ok, time.Until(dl2))
+	}
+}
+
+func TestProtonPassTimeoutCancels(t *testing.T) {
+	m := mockProtonAPI{
+		auth: func(ctx context.Context, _ string) (*protonpass.Session, error) {
+			<-ctx.Done() // simulate a slow Proton call that outlives the deadline
+			return nil, ctx.Err()
+		},
+	}
+	k := ProtonPassKeyring{Client: m, ShareID: "target", pat: "pst_x::AAAA", timeout: time.Millisecond}
+
+	if _, err := k.Keys(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Keys err = %v, want context.DeadlineExceeded", err)
 	}
 }
 

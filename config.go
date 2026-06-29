@@ -114,6 +114,10 @@ type Config struct {
 	// ProtonPassAPIBase overrides the Proton API base URL (default https://pass-api.proton.me).
 	ProtonPassAPIBase string
 
+	// ProtonPassTimeout is the per-operation timeout for Proton Pass API calls. Zero
+	// selects a built-in default.
+	ProtonPassTimeout time.Duration
+
 	// ProtonPassTokenFunc is an optional function used to prompt for the PAT when no
 	// config field or environment variable supplies one.
 	ProtonPassTokenFunc PromptFunc
