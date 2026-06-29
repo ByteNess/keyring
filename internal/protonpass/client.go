@@ -159,14 +159,20 @@ type Client struct {
 	OriginSDK   string
 }
 
-// New returns a Client with Proton defaults; apiBase may be "" for the default.
-func New(apiBase string) *Client {
+// NormalizeAPIBase resolves an empty base to the default and trims a trailing
+// slash, so callers and the session cache agree on one canonical form.
+func NormalizeAPIBase(apiBase string) string {
 	if apiBase == "" {
 		apiBase = DefaultAPIBase
 	}
+	return strings.TrimRight(apiBase, "/")
+}
+
+// New returns a Client with Proton defaults; apiBase may be "" for the default.
+func New(apiBase string) *Client {
 	return &Client{
 		HTTP:        &http.Client{Timeout: 30 * time.Second},
-		APIBase:     strings.TrimRight(apiBase, "/"),
+		APIBase:     NormalizeAPIBase(apiBase),
 		AppVersion:  DefaultAppVersion,
 		SDKVersions: DefaultSDKVersions,
 		OriginSDK:   DefaultOriginSDK,

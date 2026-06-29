@@ -103,6 +103,7 @@ func NewProtonPassKeyring(cfg *Config) (*ProtonPassKeyring, error) {
 	if apiBase == "" {
 		apiBase = os.Getenv(ProtonPassEnvAPIBase)
 	}
+	apiBase = protonpass.NormalizeAPIBase(apiBase)
 
 	itemTitlePrefix := cfg.ProtonPassItemTitlePrefix
 	if itemTitlePrefix == "" {
@@ -192,14 +193,17 @@ func (k ProtonPassKeyring) authSession(ctx context.Context, pat string, forceFre
 	return session, nil
 }
 
+// isUnauthorized reports whether the API error is a 401 (by HTTP status or Proton
+// code) — a session the server treats as expired or revoked.
+func isUnauthorized(apiErr *protonpass.APIError) bool {
+	return apiErr.Status == http.StatusUnauthorized || apiErr.Code == http.StatusUnauthorized
+}
+
 // isSessionExpired reports whether err is an authentication failure that a fresh
 // PAT exchange could recover from (a session token expired or revoked server-side).
 func isSessionExpired(err error) bool {
 	var apiErr *protonpass.APIError
-	if !errors.As(err, &apiErr) {
-		return false
-	}
-	return apiErr.Status == http.StatusUnauthorized || apiErr.Code == http.StatusUnauthorized
+	return errors.As(err, &apiErr) && isUnauthorized(apiErr)
 }
 
 // classifyProtonErr maps a raw Proton API error to an actionable backend sentinel,
@@ -218,10 +222,12 @@ func classifyProtonErr(err error) error {
 		return fmt.Errorf("%w: %w", ErrProtonPassRateLimited, err)
 	case apiErr.Code == protonCodeHumanVerification:
 		return fmt.Errorf("%w: %w", ErrProtonPassHumanVerification, err)
-	case apiErr.Status == http.StatusUnauthorized || apiErr.Code == http.StatusUnauthorized:
-		return fmt.Errorf("%w: %w", ErrProtonPassSessionExpired, err)
+	// A PAT-rejection message is more specific than the bare status, so check it
+	// before the generic 401/unauthorized case.
 	case strings.Contains(strings.ToLower(apiErr.Message), "personal access token"):
 		return fmt.Errorf("%w: %w", ErrProtonPassPATRejected, err)
+	case isUnauthorized(apiErr):
+		return fmt.Errorf("%w: %w", ErrProtonPassSessionExpired, err)
 	default:
 		return err
 	}

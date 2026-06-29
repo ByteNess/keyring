@@ -20,7 +20,7 @@ func TestKeyringSessionStoreRoundTrip(t *testing.T) {
 		t.Fatal("load on empty store returned ok")
 	}
 
-	cs := cachedSession{UID: "u", AccessToken: "tok", RefreshToken: "rt", AccessExpiry: 123, CachedAt: 456}
+	cs := cachedSession{UID: "u", AccessToken: "tok", AccessExpiry: 123, CachedAt: 456}
 	store.save("acct", cs)
 
 	got, ok := store.load("acct")
@@ -45,6 +45,7 @@ func TestCachedSessionFresh(t *testing.T) {
 		{"future epoch beyond skew", cachedSession{AccessToken: "a", AccessExpiry: now.Unix() + 3600}, true},
 		{"future epoch within skew", cachedSession{AccessToken: "a", AccessExpiry: now.Unix() + 30}, false},
 		{"duration-like value falls back to TTL", cachedSession{AccessToken: "a", AccessExpiry: 3600, CachedAt: now.Unix()}, true},
+		{"implausibly far epoch falls back to TTL", cachedSession{AccessToken: "a", AccessExpiry: now.Add(60 * 24 * time.Hour).Unix(), CachedAt: now.Unix()}, true},
 		{"no expiry, fresh within TTL", cachedSession{AccessToken: "a", CachedAt: now.Unix() - 60}, true},
 		{"no expiry, stale past TTL", cachedSession{AccessToken: "a", CachedAt: now.Add(-2 * time.Hour).Unix()}, false},
 	}
@@ -89,6 +90,7 @@ func TestClassifyProtonErr(t *testing.T) {
 		{"human verification code 9001", &protonpass.APIError{Status: 422, Code: 9001}, ErrProtonPassHumanVerification},
 		{"session expired HTTP 401", &protonpass.APIError{Status: 401}, ErrProtonPassSessionExpired},
 		{"pat rejected by message", &protonpass.APIError{Status: 400, Message: "Invalid or expired personal access token"}, ErrProtonPassPATRejected},
+		{"401 carrying a PAT message is pat-rejected", &protonpass.APIError{Status: 401, Message: "Invalid or expired personal access token"}, ErrProtonPassPATRejected},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

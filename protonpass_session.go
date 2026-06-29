@@ -25,6 +25,11 @@ const (
 	// protonSessionExpirySkew re-exchanges slightly before the reported expiry so a
 	// token does not die mid-operation.
 	protonSessionExpirySkew = 60 * time.Second
+
+	// protonSessionMaxPlausibleLifetime is the largest server expiry treated as a
+	// real timestamp. Anything further out (e.g. a millisecond epoch mistaken for
+	// seconds) is implausible for an access token and falls back to the local TTL.
+	protonSessionMaxPlausibleLifetime = 30 * 24 * time.Hour
 )
 
 // protonSecureSessionBackends are the OS-protected keyring backends eligible to
@@ -48,11 +53,12 @@ type protonSessionStore interface {
 }
 
 // cachedSession is the persisted form of an authenticated session plus the
-// bookkeeping the freshness check needs.
+// bookkeeping the freshness check needs. The refresh token is deliberately not
+// stored: recovery re-exchanges the PAT rather than using a refresh grant, so
+// persisting a long-lived refresh token would widen exposure for no benefit.
 type cachedSession struct {
 	UID          string `json:"uid"`
 	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token,omitempty"`
 	AccessExpiry int64  `json:"access_expiry,omitempty"` // server epoch seconds, if plausible
 	CachedAt     int64  `json:"cached_at"`               // unix seconds at save time
 }
@@ -61,7 +67,6 @@ func newCachedSession(s *protonpass.Session, now time.Time) cachedSession {
 	return cachedSession{
 		UID:          s.UID,
 		AccessToken:  s.AccessToken,
-		RefreshToken: s.RefreshToken,
 		AccessExpiry: s.AccessExpiry,
 		CachedAt:     now.Unix(),
 	}
@@ -71,21 +76,21 @@ func (cs cachedSession) toSession() *protonpass.Session {
 	return &protonpass.Session{
 		UID:          cs.UID,
 		AccessToken:  cs.AccessToken,
-		RefreshToken: cs.RefreshToken,
 		AccessExpiry: cs.AccessExpiry,
 	}
 }
 
 // fresh reports whether the cached session can still be reused. It trusts the
-// server expiry only when it looks like a future epoch (guarding against the value
-// being a duration rather than a timestamp); otherwise it falls back to a local
+// server expiry only when it is a plausible future epoch (bounded above to guard
+// against a duration or a millisecond epoch); otherwise it falls back to a local
 // TTL. Either way a wrongly-fresh session is caught by the 401 re-exchange path.
 func (cs cachedSession) fresh(now time.Time) bool {
 	if cs.AccessToken == "" {
 		return false
 	}
 	nowUnix := now.Unix()
-	if cs.AccessExpiry > nowUnix {
+	maxPlausible := now.Add(protonSessionMaxPlausibleLifetime).Unix()
+	if cs.AccessExpiry > nowUnix && cs.AccessExpiry <= maxPlausible {
 		return nowUnix+int64(protonSessionExpirySkew.Seconds()) < cs.AccessExpiry
 	}
 	return now.Before(time.Unix(cs.CachedAt, 0).Add(protonSessionFallbackTTL))
@@ -104,6 +109,7 @@ func (s *keyringSessionStore) load(account string) (cachedSession, bool) {
 	}
 	var cs cachedSession
 	if err := json.Unmarshal(item.Data, &cs); err != nil {
+		debugf("proton-pass: discarding unreadable session cache entry: %v", err)
 		return cachedSession{}, false
 	}
 	return cs, true
