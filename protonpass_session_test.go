@@ -204,6 +204,85 @@ func TestProtonPassSessionCacheReuse(t *testing.T) {
 	}
 }
 
+// TestProtonPassSetRetriesLoadIssuesWriteOnce proves a stale cached session is
+// recovered during the load phase and the create is issued exactly once.
+func TestProtonPassSetRetriesLoadIssuesWriteOnce(t *testing.T) {
+	fx := buildVaultFixture(t, nil) // empty vault: Set must create
+	now := time.Unix(1_700_000_000, 0)
+	store := &keyringSessionStore{kr: NewArrayKeyring(nil)}
+	account := protonSessionAccount("", fx.pat)
+	store.save(account, newCachedSession(&protonpass.Session{UID: "stale", AccessToken: "stale-token"}, now))
+
+	var authCalls, shareCalls, createCalls int
+	m := readMock(fx)
+	m.auth = func(_ context.Context, _ string) (*protonpass.Session, error) {
+		authCalls++
+		return &protonpass.Session{UID: "fresh", AccessToken: "fresh-token"}, nil
+	}
+	m.shares = func(_ context.Context, s *protonpass.Session) ([]protonpass.Share, error) {
+		shareCalls++
+		if s.AccessToken == "stale-token" {
+			return nil, &protonpass.APIError{Status: 401, Code: 401, Message: "Invalid access token"}
+		}
+		return []protonpass.Share{{ShareID: "target", ContentKeyRotation: 1}}, nil
+	}
+	m.create = func(_ context.Context, _ *protonpass.Session, _ string, _ protonpass.CreateItemRequest) (*protonpass.ItemRevision, error) {
+		createCalls++
+		return &protonpass.ItemRevision{ItemID: "new", Revision: 1}, nil
+	}
+	k := ProtonPassKeyring{Client: *m, ShareID: "target", ItemTitlePrefix: "aws-vault", pat: fx.pat, cache: store, nowFunc: func() time.Time { return now }}
+
+	if err := k.Set(Item{Key: "dev", Data: []byte("blob")}); err != nil {
+		t.Fatalf("Set after stale-session retry: %v", err)
+	}
+	if authCalls != 1 {
+		t.Fatalf("Authenticate called %d times, want 1 (re-exchange during load)", authCalls)
+	}
+	if shareCalls != 2 {
+		t.Fatalf("ListShares called %d times, want 2 (stale 401, then fresh)", shareCalls)
+	}
+	if createCalls != 1 {
+		t.Fatalf("CreateItem called %d times, want exactly 1 (write must not be re-issued)", createCalls)
+	}
+}
+
+// TestProtonPassWritePhase401NotRetried proves a 401 raised by the write itself is
+// not retried (the create may already be applied); the cache is dropped so the next
+// invocation re-exchanges, and the error is surfaced as session-expired.
+func TestProtonPassWritePhase401NotRetried(t *testing.T) {
+	fx := buildVaultFixture(t, nil)
+	now := time.Unix(1_700_000_000, 0)
+	store := &keyringSessionStore{kr: NewArrayKeyring(nil)}
+	account := protonSessionAccount("", fx.pat)
+	store.save(account, newCachedSession(&protonpass.Session{UID: "u", AccessToken: "good-token"}, now))
+
+	var authCalls, createCalls int
+	m := readMock(fx)
+	m.auth = func(_ context.Context, _ string) (*protonpass.Session, error) {
+		authCalls++
+		return &protonpass.Session{UID: "u2", AccessToken: "good-token-2"}, nil
+	}
+	m.create = func(_ context.Context, _ *protonpass.Session, _ string, _ protonpass.CreateItemRequest) (*protonpass.ItemRevision, error) {
+		createCalls++
+		return nil, &protonpass.APIError{Status: 401, Code: 401, Message: "Invalid access token"}
+	}
+	k := ProtonPassKeyring{Client: *m, ShareID: "target", ItemTitlePrefix: "aws-vault", pat: fx.pat, cache: store, nowFunc: func() time.Time { return now }}
+
+	err := k.Set(Item{Key: "dev", Data: []byte("blob")})
+	if !errors.Is(err, ErrProtonPassSessionExpired) {
+		t.Fatalf("Set err = %v, want ErrProtonPassSessionExpired", err)
+	}
+	if createCalls != 1 {
+		t.Fatalf("CreateItem called %d times, want exactly 1 (write-phase 401 must not retry)", createCalls)
+	}
+	if authCalls != 0 {
+		t.Fatalf("Authenticate called %d times, want 0 (load used the cached session)", authCalls)
+	}
+	if _, ok := store.load(account); ok {
+		t.Fatal("cache must be invalidated after a write-phase 401")
+	}
+}
+
 // TestProtonPassSessionCacheNilNoReuse confirms that without a cache the backend
 // behaves as before: it re-exchanges on every operation.
 func TestProtonPassSessionCacheNilNoReuse(t *testing.T) {

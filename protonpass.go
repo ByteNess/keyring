@@ -314,23 +314,28 @@ func (k ProtonPassKeyring) loadVaultOnce(ctx context.Context, pat string, encKey
 	return session, vaultKeys, items, nil
 }
 
-// withVault loads the vault and runs fn against it. If the operation fails because
-// a cached session was expired or revoked server-side, it invalidates the cache,
-// re-exchanges the PAT once, and retries. This is what lets the session cache stay
-// usable across invocations without surfacing stale-session errors to the user.
+// withVault loads the vault, then runs fn against it exactly once. The 401 retry
+// is scoped to the load phase: if loading fails because a cached session was
+// expired or revoked server-side, the cache is invalidated, the PAT re-exchanged,
+// and the load retried — all before any mutation runs, so a write (fn) is never
+// re-issued. If fn itself fails with a session-expired error (the token died after
+// the load), the cache is dropped so the next invocation re-exchanges, but fn is
+// not retried, since a create may already have been applied.
 func (k ProtonPassKeyring) withVault(ctx context.Context, pat string, encKey []byte, fn func(session *protonpass.Session, vaultKeys map[int][]byte, items []decryptedItem) error) error {
 	session, vaultKeys, items, err := k.loadVaultOnce(ctx, pat, encKey, false)
-	if err == nil {
-		err = fn(session, vaultKeys, items)
-	}
 	if err != nil && k.cache != nil && isSessionExpired(err) {
-		zeroVaultKeys(vaultKeys) // discard the stale attempt's decrypted keys
 		session, vaultKeys, items, err = k.loadVaultOnce(ctx, pat, encKey, true)
-		if err == nil {
-			err = fn(session, vaultKeys, items)
-		}
 	}
-	zeroVaultKeys(vaultKeys)
+	if err != nil {
+		return err
+	}
+	defer zeroVaultKeys(vaultKeys)
+	defer zeroItems(items)
+
+	err = fn(session, vaultKeys, items)
+	if err != nil && k.cache != nil && isSessionExpired(err) {
+		k.cache.invalidate(protonSessionAccount(k.apiBase, pat))
+	}
 	return err
 }
 
@@ -532,6 +537,16 @@ func zeroBytes(b []byte) {
 func zeroVaultKeys(m map[int][]byte) {
 	for _, k := range m {
 		zeroBytes(k)
+	}
+}
+
+// zeroItems clears the per-item content key held by each decrypted item. For
+// legacy items this aliases a share key (already cleared by zeroVaultKeys); a
+// second zeroing is harmless. Call after fn has run, since the update path reads
+// the content key.
+func zeroItems(items []decryptedItem) {
+	for _, it := range items {
+		zeroBytes(it.contentKey)
 	}
 }
 
