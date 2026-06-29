@@ -5,6 +5,7 @@ package keyring
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -53,6 +54,52 @@ func TestCachedSessionFresh(t *testing.T) {
 				t.Errorf("fresh() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestClassifyProtonErr(t *testing.T) {
+	tests := []struct {
+		name   string
+		apiErr *protonpass.APIError
+		want   error
+	}{
+		{"rate limit by HTTP 429", &protonpass.APIError{Status: 429}, ErrProtonPassRateLimited},
+		{"rate limit by code 2028", &protonpass.APIError{Status: 200, Code: 2028}, ErrProtonPassRateLimited},
+		{"human verification code 9001", &protonpass.APIError{Status: 422, Code: 9001}, ErrProtonPassHumanVerification},
+		{"session expired HTTP 401", &protonpass.APIError{Status: 401}, ErrProtonPassSessionExpired},
+		{"pat rejected by message", &protonpass.APIError{Status: 400, Message: "Invalid or expired personal access token"}, ErrProtonPassPATRejected},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyProtonErr(fmt.Errorf("op: %w", tt.apiErr))
+			if !errors.Is(got, tt.want) {
+				t.Errorf("classifyProtonErr = %v, want it to wrap %v", got, tt.want)
+			}
+			var ae *protonpass.APIError
+			if !errors.As(got, &ae) {
+				t.Error("classified error must still unwrap to the original APIError")
+			}
+		})
+	}
+
+	if classifyProtonErr(nil) != nil {
+		t.Error("classifyProtonErr(nil) must be nil")
+	}
+	plain := errors.New("not an api error")
+	if !errors.Is(classifyProtonErr(plain), plain) {
+		t.Error("non-API errors must pass through unchanged")
+	}
+}
+
+func TestProtonPassRateLimitSurfaced(t *testing.T) {
+	m := mockProtonAPI{
+		auth: func(_ context.Context, _ string) (*protonpass.Session, error) {
+			return nil, &protonpass.APIError{Status: 429, Code: 2028, Message: "Too many recent logins"}
+		},
+	}
+	k := ProtonPassKeyring{Client: m, ShareID: "target", pat: "pst_x::AAAA"}
+	if _, err := k.Keys(); !errors.Is(err, ErrProtonPassRateLimited) {
+		t.Fatalf("Keys err = %v, want ErrProtonPassRateLimited", err)
 	}
 }
 

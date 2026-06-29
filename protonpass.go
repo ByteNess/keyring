@@ -30,6 +30,10 @@ const (
 	// protonPassDefaultTimeout bounds a single backend operation (which may issue
 	// several HTTP calls) when no timeout is configured.
 	protonPassDefaultTimeout = 30 * time.Second
+
+	// Proton API error codes the backend recognises.
+	protonCodeTooManyLogins     = 2028 // accompanies HTTP 429 "Too many recent logins"
+	protonCodeHumanVerification = 9001 // human-verification / CAPTCHA challenge required
 )
 
 // Errors returned by the Proton Pass backend.
@@ -41,6 +45,24 @@ var (
 	// ErrProtonPassShareNotAccessible is returned when the configured Share ID is
 	// not among the shares the PAT can access (usually a missing access grant).
 	ErrProtonPassShareNotAccessible = errors.New("proton-pass backend: configured share id is not accessible to this PAT (grant it access)")
+
+	// ErrProtonPassRateLimited wraps Proton's "too many recent logins" response.
+	// Session caching should keep operations well under the limit; hitting this
+	// usually means a burst of fresh logins, so wait a few minutes before retrying.
+	ErrProtonPassRateLimited = errors.New("proton-pass backend: rate limited by Proton (too many recent logins); wait a few minutes and retry")
+
+	// ErrProtonPassSessionExpired is returned when a session is rejected as expired
+	// or revoked and re-exchanging the PAT did not recover it.
+	ErrProtonPassSessionExpired = errors.New("proton-pass backend: Proton session expired or revoked")
+
+	// ErrProtonPassPATRejected is returned when Proton rejects the PAT itself
+	// (invalid, expired, or revoked); mint or re-grant a personal access token.
+	ErrProtonPassPATRejected = errors.New("proton-pass backend: personal access token rejected (invalid, expired, or revoked)")
+
+	// ErrProtonPassHumanVerification is returned when Proton demands human
+	// verification (CAPTCHA / 2FA), which this headless client cannot satisfy;
+	// re-authenticate with the Proton Pass app or CLI to clear it.
+	ErrProtonPassHumanVerification = errors.New("proton-pass backend: Proton requires human verification, which this client cannot satisfy; re-authenticate with the Proton Pass app or CLI")
 )
 
 func init() {
@@ -178,6 +200,31 @@ func isSessionExpired(err error) bool {
 		return false
 	}
 	return apiErr.Status == http.StatusUnauthorized || apiErr.Code == http.StatusUnauthorized
+}
+
+// classifyProtonErr maps a raw Proton API error to an actionable backend sentinel,
+// keeping the original error unwrappable for diagnostics. Non-API errors (e.g.
+// ErrProtonPassShareNotAccessible, ErrKeyNotFound) pass through unchanged.
+func classifyProtonErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *protonpass.APIError
+	if !errors.As(err, &apiErr) {
+		return err
+	}
+	switch {
+	case apiErr.Status == http.StatusTooManyRequests || apiErr.Code == protonCodeTooManyLogins:
+		return fmt.Errorf("%w: %w", ErrProtonPassRateLimited, err)
+	case apiErr.Code == protonCodeHumanVerification:
+		return fmt.Errorf("%w: %w", ErrProtonPassHumanVerification, err)
+	case apiErr.Status == http.StatusUnauthorized || apiErr.Code == http.StatusUnauthorized:
+		return fmt.Errorf("%w: %w", ErrProtonPassSessionExpired, err)
+	case strings.Contains(strings.ToLower(apiErr.Message), "personal access token"):
+		return fmt.Errorf("%w: %w", ErrProtonPassPATRejected, err)
+	default:
+		return err
+	}
 }
 
 // decryptedItem is one aws-vault item recovered from the vault: its key (the title
@@ -346,7 +393,7 @@ func (k ProtonPassKeyring) Keys() ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, classifyProtonErr(err)
 	}
 	return keys, nil
 }
@@ -372,7 +419,7 @@ func (k ProtonPassKeyring) Get(key string) (Item, error) {
 		return nil
 	})
 	if err != nil {
-		return Item{}, err
+		return Item{}, classifyProtonErr(err)
 	}
 	if !found {
 		return Item{}, ErrKeyNotFound
@@ -396,9 +443,9 @@ func (k ProtonPassKeyring) Set(item Item) error {
 	if err != nil {
 		return err
 	}
-	return k.withVault(ctx, pat, encKey, func(session *protonpass.Session, vaultKeys map[int][]byte, items []decryptedItem) error {
+	return classifyProtonErr(k.withVault(ctx, pat, encKey, func(session *protonpass.Session, vaultKeys map[int][]byte, items []decryptedItem) error {
 		return k.setItem(ctx, session, vaultKeys, items, item)
-	})
+	}))
 }
 
 // setItem performs the create-or-update against an already-loaded vault.
@@ -456,13 +503,13 @@ func (k ProtonPassKeyring) Remove(key string) error {
 	if err != nil {
 		return err
 	}
-	return k.withVault(ctx, pat, encKey, func(session *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
+	return classifyProtonErr(k.withVault(ctx, pat, encKey, func(session *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
 		existing, ok := findItem(items, key)
 		if !ok {
 			return ErrKeyNotFound
 		}
 		return k.Client.DeleteItem(ctx, session, k.ShareID, existing.itemID, existing.revision)
-	})
+	}))
 }
 
 // findItem returns the decrypted item with the given key.
