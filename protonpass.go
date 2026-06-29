@@ -6,9 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/byteness/keyring/internal/protonpass"
 )
@@ -52,6 +54,10 @@ type ProtonPassKeyring struct {
 
 	pat       string
 	tokenFunc PromptFunc
+
+	apiBase string
+	cache   protonSessionStore
+	nowFunc func() time.Time // overridable in tests; nil means time.Now
 }
 
 // NewProtonPassKeyring builds a Proton Pass keyring from config + environment.
@@ -82,7 +88,17 @@ func NewProtonPassKeyring(cfg *Config) (*ProtonPassKeyring, error) {
 		ItemTitlePrefix: itemTitlePrefix,
 		pat:             cfg.ProtonPassPAT,
 		tokenFunc:       cfg.ProtonPassTokenFunc,
+		apiBase:         apiBase,
+		cache:           newKeychainSessionStore(),
 	}, nil
+}
+
+// now returns the current time, allowing tests to control session-cache aging.
+func (k ProtonPassKeyring) now() time.Time {
+	if k.nowFunc != nil {
+		return k.nowFunc()
+	}
+	return time.Now()
 }
 
 // resolvePAT returns the PAT from config, then env, then a prompt.
@@ -99,23 +115,53 @@ func (k ProtonPassKeyring) resolvePAT() (string, error) {
 	return "", ErrProtonPassNoPAT
 }
 
-// session resolves the PAT, exchanges it for a Proton session, and derives the AES
-// enc-key from the PAT's "::<key>" half. Every operation authenticates afresh; there
-// is no session caching yet.
-func (k ProtonPassKeyring) session(ctx context.Context) (*protonpass.Session, []byte, error) {
-	pat, err := k.resolvePAT()
+// patAndKey resolves the PAT once and derives the AES enc-key from its "::<key>"
+// half. Resolving once per operation means a prompt-sourced PAT is requested at
+// most once, even when an operation retries after a session expiry.
+func (k ProtonPassKeyring) patAndKey() (pat string, encKey []byte, err error) {
+	pat, err = k.resolvePAT()
 	if err != nil {
-		return nil, nil, err
+		return "", nil, err
 	}
-	encKey, err := protonpass.PATKey(pat)
+	encKey, err = protonpass.PATKey(pat)
 	if err != nil {
-		return nil, nil, err
+		return "", nil, err
+	}
+	return pat, encKey, nil
+}
+
+// authSession returns a usable Proton session for pat, reusing a fresh cached one
+// when available and otherwise exchanging the PAT and caching the result.
+// forceFresh clears the cache and forces a new exchange, recovering from a cached
+// session that the server has expired or revoked. Caching is best-effort: a store
+// failure degrades to a per-operation exchange, never an operation failure.
+func (k ProtonPassKeyring) authSession(ctx context.Context, pat string, forceFresh bool) (*protonpass.Session, error) {
+	account := protonSessionAccount(k.apiBase, pat)
+	if k.cache != nil {
+		if forceFresh {
+			k.cache.invalidate(account)
+		} else if cs, ok := k.cache.load(account); ok && cs.fresh(k.now()) {
+			return cs.toSession(), nil
+		}
 	}
 	session, err := k.Client.Authenticate(ctx, pat)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return session, encKey, nil
+	if k.cache != nil {
+		k.cache.save(account, newCachedSession(session, k.now()))
+	}
+	return session, nil
+}
+
+// isSessionExpired reports whether err is an authentication failure that a fresh
+// PAT exchange could recover from (a session token expired or revoked server-side).
+func isSessionExpired(err error) bool {
+	var apiErr *protonpass.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.Status == http.StatusUnauthorized || apiErr.Code == http.StatusUnauthorized
 }
 
 // decryptedItem is one aws-vault item recovered from the vault: its key (the title
@@ -130,42 +176,43 @@ type decryptedItem struct {
 	contentKey  []byte // the AES key Content is sealed under (per-item key, or share key for old items)
 }
 
-// openVault authenticates, verifies the configured Share is accessible, and
-// decrypts every share-key rotation (AES-GCM with the PAT enc-key) into a
-// rotation -> 32-byte share key map.
-func (k ProtonPassKeyring) openVault(ctx context.Context) (*protonpass.Session, map[int][]byte, error) {
-	session, encKey, err := k.session(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
+// openVault verifies the configured Share is accessible and decrypts every
+// share-key rotation (AES-GCM with the PAT enc-key) into a rotation -> 32-byte
+// share key map.
+func (k ProtonPassKeyring) openVault(ctx context.Context, session *protonpass.Session, encKey []byte) (map[int][]byte, error) {
 	shares, err := k.Client.ListShares(ctx, session)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if !slices.ContainsFunc(shares, func(s protonpass.Share) bool { return s.ShareID == k.ShareID }) {
-		return nil, nil, ErrProtonPassShareNotAccessible
+		return nil, ErrProtonPassShareNotAccessible
 	}
 
 	shareKeys, err := k.Client.GetShareKeys(ctx, session, k.ShareID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	vaultKeys := make(map[int][]byte, len(shareKeys))
 	for _, sk := range shareKeys {
 		raw, err := protonpass.OpenShareKey(sk, encKey)
 		if err != nil {
-			return nil, nil, fmt.Errorf("open share key (rotation %d): %w", sk.KeyRotation, err)
+			return nil, fmt.Errorf("open share key (rotation %d): %w", sk.KeyRotation, err)
 		}
 		vaultKeys[sk.KeyRotation] = raw
 	}
-	return session, vaultKeys, nil
+	return vaultKeys, nil
 }
 
-// loadVault authenticates, decrypts the share keys, then lists and decrypts every
-// aws-vault item into its key, note, and the identifiers + content key the write
-// path needs. Items whose title lacks this keyring's namespace prefix are dropped.
-func (k ProtonPassKeyring) loadVault(ctx context.Context) (*protonpass.Session, map[int][]byte, []decryptedItem, error) {
-	session, vaultKeys, err := k.openVault(ctx)
+// loadVaultOnce authenticates (cache-aware), decrypts the share keys, then lists
+// and decrypts every aws-vault item into its key, note, and the identifiers +
+// content key the write path needs. Items whose title lacks this keyring's
+// namespace prefix are dropped. forceFresh forces a new PAT exchange.
+func (k ProtonPassKeyring) loadVaultOnce(ctx context.Context, pat string, encKey []byte, forceFresh bool) (*protonpass.Session, map[int][]byte, []decryptedItem, error) {
+	session, err := k.authSession(ctx, pat, forceFresh)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	vaultKeys, err := k.openVault(ctx, session, encKey)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -204,10 +251,22 @@ func (k ProtonPassKeyring) loadVault(ctx context.Context) (*protonpass.Session, 
 	return session, vaultKeys, items, nil
 }
 
-// readItems returns just the decrypted items, for the read-only Keys/Get paths.
-func (k ProtonPassKeyring) readItems(ctx context.Context) ([]decryptedItem, error) {
-	_, _, items, err := k.loadVault(ctx)
-	return items, err
+// withVault loads the vault and runs fn against it. If the operation fails because
+// a cached session was expired or revoked server-side, it invalidates the cache,
+// re-exchanges the PAT once, and retries. This is what lets the session cache stay
+// usable across invocations without surfacing stale-session errors to the user.
+func (k ProtonPassKeyring) withVault(ctx context.Context, pat string, encKey []byte, fn func(session *protonpass.Session, vaultKeys map[int][]byte, items []decryptedItem) error) error {
+	session, vaultKeys, items, err := k.loadVaultOnce(ctx, pat, encKey, false)
+	if err == nil {
+		err = fn(session, vaultKeys, items)
+	}
+	if err != nil && k.cache != nil && isSessionExpired(err) {
+		session, vaultKeys, items, err = k.loadVaultOnce(ctx, pat, encKey, true)
+		if err == nil {
+			err = fn(session, vaultKeys, items)
+		}
+	}
+	return err
 }
 
 // openContent decrypts one item revision's Content and returns the plaintext plus
@@ -254,30 +313,53 @@ func (k ProtonPassKeyring) keyFromTitle(title string) (string, bool) {
 // Keys lists the aws-vault item keys in the configured vault. Titles live inside
 // the encrypted item content, so this fetches and decrypts every item.
 func (k ProtonPassKeyring) Keys() ([]string, error) {
-	items, err := k.readItems(context.Background())
+	ctx := context.Background()
+	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return nil, err
 	}
-	keys := make([]string, 0, len(items))
-	for _, it := range items {
-		keys = append(keys, it.key)
+
+	var keys []string
+	err = k.withVault(ctx, pat, encKey, func(_ *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
+		keys = make([]string, 0, len(items))
+		for _, it := range items {
+			keys = append(keys, it.key)
+		}
+		slices.Sort(keys)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	slices.Sort(keys)
 	return keys, nil
 }
 
 // Get returns the Item for key, decrypting its stored blob, or ErrKeyNotFound.
 func (k ProtonPassKeyring) Get(key string) (Item, error) {
-	items, err := k.readItems(context.Background())
+	ctx := context.Background()
+	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return Item{}, err
 	}
-	for _, it := range items {
-		if it.key == key {
-			return Item{Key: key, Data: []byte(it.note)}, nil
+
+	var found bool
+	var out Item
+	err = k.withVault(ctx, pat, encKey, func(_ *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
+		for _, it := range items {
+			if it.key == key {
+				out, found = Item{Key: key, Data: []byte(it.note)}, true
+				return nil
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return Item{}, err
 	}
-	return Item{}, ErrKeyNotFound
+	if !found {
+		return Item{}, ErrKeyNotFound
+	}
+	return out, nil
 }
 
 // GetMetadata reports that Proton requires credentials even for metadata.
@@ -291,11 +373,17 @@ func (k ProtonPassKeyring) GetMetadata(_ string) (Metadata, error) {
 // key); otherwise a new item is created under the current share-key rotation.
 func (k ProtonPassKeyring) Set(item Item) error {
 	ctx := context.Background()
-	session, vaultKeys, items, err := k.loadVault(ctx)
+	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return err
 	}
+	return k.withVault(ctx, pat, encKey, func(session *protonpass.Session, vaultKeys map[int][]byte, items []decryptedItem) error {
+		return k.setItem(ctx, session, vaultKeys, items, item)
+	})
+}
 
+// setItem performs the create-or-update against an already-loaded vault.
+func (k ProtonPassKeyring) setItem(ctx context.Context, session *protonpass.Session, vaultKeys map[int][]byte, items []decryptedItem, item Item) error {
 	uuid, err := protonpass.NewItemUUID()
 	if err != nil {
 		return err
@@ -344,15 +432,17 @@ func (k ProtonPassKeyring) Set(item Item) error {
 // ErrKeyNotFound if no aws-vault item carries that key.
 func (k ProtonPassKeyring) Remove(key string) error {
 	ctx := context.Background()
-	session, _, items, err := k.loadVault(ctx)
+	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return err
 	}
-	existing, ok := findItem(items, key)
-	if !ok {
-		return ErrKeyNotFound
-	}
-	return k.Client.DeleteItem(ctx, session, k.ShareID, existing.itemID, existing.revision)
+	return k.withVault(ctx, pat, encKey, func(session *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
+		existing, ok := findItem(items, key)
+		if !ok {
+			return ErrKeyNotFound
+		}
+		return k.Client.DeleteItem(ctx, session, k.ShareID, existing.itemID, existing.revision)
+	})
 }
 
 // findItem returns the decrypted item with the given key.

@@ -1,0 +1,152 @@
+//go:build !keyring_noprotonpass
+
+package keyring
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"time"
+
+	"github.com/byteness/keyring/internal/protonpass"
+)
+
+const (
+	// protonSessionServiceName is the keychain service under which cached Proton
+	// sessions live, kept separate from any aws-vault credential items.
+	protonSessionServiceName = "aws-vault-proton-pass-session"
+
+	// protonSessionFallbackTTL bounds reuse of a cached session when the server
+	// expiry is absent or implausible. A stale-but-cached session is still caught
+	// by the 401 re-exchange path, so this only caps proactive re-logins; it is
+	// deliberately well below typical Proton token lifetimes.
+	protonSessionFallbackTTL = time.Hour
+
+	// protonSessionExpirySkew re-exchanges slightly before the reported expiry so a
+	// token does not die mid-operation.
+	protonSessionExpirySkew = 60 * time.Second
+)
+
+// protonSecureSessionBackends are the OS-protected keyring backends eligible to
+// hold the cached session, in platform-preference order. File/pass-style backends
+// are intentionally excluded: the cached session is a live bearer credential.
+var protonSecureSessionBackends = []BackendType{
+	WinCredBackend,
+	WinHelloBackend,
+	KeychainBackend,
+	SecretServiceBackend,
+	KWalletBackend,
+}
+
+// protonSessionStore persists and retrieves a cached Proton session keyed by an
+// opaque, non-secret account id. Every method is best-effort: a caching failure
+// must never fail the underlying keyring operation.
+type protonSessionStore interface {
+	load(account string) (cachedSession, bool)
+	save(account string, cs cachedSession)
+	invalidate(account string)
+}
+
+// cachedSession is the persisted form of an authenticated session plus the
+// bookkeeping the freshness check needs.
+type cachedSession struct {
+	UID          string `json:"uid"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	AccessExpiry int64  `json:"access_expiry,omitempty"` // server epoch seconds, if plausible
+	CachedAt     int64  `json:"cached_at"`               // unix seconds at save time
+}
+
+func newCachedSession(s *protonpass.Session, now time.Time) cachedSession {
+	return cachedSession{
+		UID:          s.UID,
+		AccessToken:  s.AccessToken,
+		RefreshToken: s.RefreshToken,
+		AccessExpiry: s.AccessExpiry,
+		CachedAt:     now.Unix(),
+	}
+}
+
+func (cs cachedSession) toSession() *protonpass.Session {
+	return &protonpass.Session{
+		UID:          cs.UID,
+		AccessToken:  cs.AccessToken,
+		RefreshToken: cs.RefreshToken,
+		AccessExpiry: cs.AccessExpiry,
+	}
+}
+
+// fresh reports whether the cached session can still be reused. It trusts the
+// server expiry only when it looks like a future epoch (guarding against the value
+// being a duration rather than a timestamp); otherwise it falls back to a local
+// TTL. Either way a wrongly-fresh session is caught by the 401 re-exchange path.
+func (cs cachedSession) fresh(now time.Time) bool {
+	if cs.AccessToken == "" {
+		return false
+	}
+	nowUnix := now.Unix()
+	if cs.AccessExpiry > nowUnix {
+		return nowUnix+int64(protonSessionExpirySkew.Seconds()) < cs.AccessExpiry
+	}
+	return now.Before(time.Unix(cs.CachedAt, 0).Add(protonSessionFallbackTTL))
+}
+
+// keyringSessionStore stores the cached session as a JSON item in an underlying
+// (OS-protected) keyring.
+type keyringSessionStore struct {
+	kr Keyring
+}
+
+func (s *keyringSessionStore) load(account string) (cachedSession, bool) {
+	item, err := s.kr.Get(account)
+	if err != nil {
+		return cachedSession{}, false
+	}
+	var cs cachedSession
+	if err := json.Unmarshal(item.Data, &cs); err != nil {
+		return cachedSession{}, false
+	}
+	return cs, true
+}
+
+func (s *keyringSessionStore) save(account string, cs cachedSession) {
+	data, err := json.Marshal(cs)
+	if err != nil {
+		return
+	}
+	_ = s.kr.Set(Item{
+		Key:         account,
+		Data:        data,
+		Label:       protonSessionServiceName,
+		Description: "aws-vault cached Proton Pass session",
+	})
+}
+
+func (s *keyringSessionStore) invalidate(account string) {
+	_ = s.kr.Remove(account)
+}
+
+// newKeychainSessionStore opens an OS-protected keyring for caching the Proton
+// session. It returns nil when no secure backend is available (for example a
+// headless host with no Secret Service): the backend then re-exchanges the PAT on
+// every operation, so calls in quick succession may hit Proton's login rate limit.
+func newKeychainSessionStore() protonSessionStore {
+	kr, err := Open(Config{
+		ServiceName:     protonSessionServiceName,
+		AllowedBackends: protonSecureSessionBackends,
+	})
+	if err != nil {
+		debugf("proton-pass: no secure backend for session cache (%v); each operation will re-exchange the PAT", err)
+		return nil
+	}
+	return &keyringSessionStore{kr: kr}
+}
+
+// protonSessionAccount derives a stable, non-secret keychain account id from the
+// API base and the PAT's token half, so rotating the PAT or pointing at a
+// different API naturally invalidates the cache. Only the "pst_<token>" half feeds
+// the hash; the "::<key>" crypto half never leaves the process.
+func protonSessionAccount(apiBase, pat string) string {
+	sum := sha256.Sum256([]byte(apiBase + "\x00" + protonpass.PATToken(pat)))
+	return hex.EncodeToString(sum[:])
+}
