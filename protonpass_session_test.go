@@ -147,6 +147,43 @@ func TestProtonPassOpContextDeadline(t *testing.T) {
 	}
 }
 
+func TestProtonPassTimeoutExcludesPrompt(t *testing.T) {
+	fx := buildVaultFixture(t, nil)
+	const timeout = 30 * time.Second
+	var promptAt, deadlineSeen time.Time
+	var hadDeadline bool
+
+	m := readMock(fx)
+	baseAuth := m.auth
+	m.auth = func(ctx context.Context, pat string) (*protonpass.Session, error) {
+		deadlineSeen, hadDeadline = ctx.Deadline()
+		return baseAuth(ctx, pat)
+	}
+	k := ProtonPassKeyring{
+		Client:          *m,
+		ShareID:         "target",
+		ItemTitlePrefix: "aws-vault",
+		timeout:         timeout,
+		tokenFunc: func(string) (string, error) {
+			promptAt = time.Now()
+			return fx.pat, nil
+		},
+	}
+
+	if _, err := k.Keys(); err != nil {
+		t.Fatalf("Keys: %v", err)
+	}
+	if !hadDeadline {
+		t.Fatal("operation ran without a deadline")
+	}
+	// The deadline is now()+timeout taken when opContext runs, so deadline-timeout is
+	// when the timeout window opened. It must be at or after the prompt returned —
+	// otherwise interactive prompt time is being charged against the op timeout.
+	if windowStart := deadlineSeen.Add(-timeout); windowStart.Before(promptAt) {
+		t.Fatalf("timeout window opened before the PAT prompt; prompt time counts against the op timeout")
+	}
+}
+
 func TestProtonPassTimeoutCancels(t *testing.T) {
 	m := mockProtonAPI{
 		auth: func(ctx context.Context, _ string) (*protonpass.Session, error) {

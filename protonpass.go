@@ -389,13 +389,14 @@ func (k ProtonPassKeyring) keyFromTitle(title string) (string, bool) {
 // Keys lists the aws-vault item keys in the configured vault. Titles live inside
 // the encrypted item content, so this fetches and decrypts every item.
 func (k ProtonPassKeyring) Keys() ([]string, error) {
-	ctx, cancel := k.opContext()
-	defer cancel()
 	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return nil, err
 	}
 	defer zeroBytes(encKey)
+
+	ctx, cancel := k.opContext()
+	defer cancel()
 
 	var keys []string
 	err = k.withVault(ctx, pat, encKey, func(_ *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
@@ -414,13 +415,14 @@ func (k ProtonPassKeyring) Keys() ([]string, error) {
 
 // Get returns the Item for key, decrypting its stored blob, or ErrKeyNotFound.
 func (k ProtonPassKeyring) Get(key string) (Item, error) {
-	ctx, cancel := k.opContext()
-	defer cancel()
 	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return Item{}, err
 	}
 	defer zeroBytes(encKey)
+
+	ctx, cancel := k.opContext()
+	defer cancel()
 
 	var found bool
 	var out Item
@@ -452,13 +454,14 @@ func (k ProtonPassKeyring) GetMetadata(_ string) (Metadata, error) {
 // with the same key is updated in place (re-encrypted under its current per-item
 // key); otherwise a new item is created under the current share-key rotation.
 func (k ProtonPassKeyring) Set(item Item) error {
-	ctx, cancel := k.opContext()
-	defer cancel()
 	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return err
 	}
 	defer zeroBytes(encKey)
+
+	ctx, cancel := k.opContext()
+	defer cancel()
 	return classifyProtonErr(k.withVault(ctx, pat, encKey, func(session *protonpass.Session, vaultKeys map[int][]byte, items []decryptedItem) error {
 		return k.setItem(ctx, session, vaultKeys, items, item)
 	}))
@@ -514,13 +517,14 @@ func (k ProtonPassKeyring) setItem(ctx context.Context, session *protonpass.Sess
 // Remove permanently deletes the item with the matching key, or returns
 // ErrKeyNotFound if no aws-vault item carries that key.
 func (k ProtonPassKeyring) Remove(key string) error {
-	ctx, cancel := k.opContext()
-	defer cancel()
 	pat, encKey, err := k.patAndKey()
 	if err != nil {
 		return err
 	}
 	defer zeroBytes(encKey)
+
+	ctx, cancel := k.opContext()
+	defer cancel()
 	return classifyProtonErr(k.withVault(ctx, pat, encKey, func(session *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
 		existing, ok := findItem(items, key)
 		if !ok {
