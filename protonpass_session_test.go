@@ -57,6 +57,27 @@ func TestCachedSessionFresh(t *testing.T) {
 	}
 }
 
+func TestZeroBytes(t *testing.T) {
+	b := []byte{1, 2, 3, 4}
+	zeroBytes(b)
+	for i, v := range b {
+		if v != 0 {
+			t.Fatalf("byte %d = %d, want 0", i, v)
+		}
+	}
+	zeroBytes(nil) // must not panic
+
+	m := map[int][]byte{1: {9, 9}, 2: {7}}
+	zeroVaultKeys(m)
+	for rot, k := range m {
+		for i, v := range k {
+			if v != 0 {
+				t.Fatalf("rotation %d byte %d = %d, want 0", rot, i, v)
+			}
+		}
+	}
+}
+
 func TestClassifyProtonErr(t *testing.T) {
 	tests := []struct {
 		name   string

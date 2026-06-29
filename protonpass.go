@@ -324,11 +324,13 @@ func (k ProtonPassKeyring) withVault(ctx context.Context, pat string, encKey []b
 		err = fn(session, vaultKeys, items)
 	}
 	if err != nil && k.cache != nil && isSessionExpired(err) {
+		zeroVaultKeys(vaultKeys) // discard the stale attempt's decrypted keys
 		session, vaultKeys, items, err = k.loadVaultOnce(ctx, pat, encKey, true)
 		if err == nil {
 			err = fn(session, vaultKeys, items)
 		}
 	}
+	zeroVaultKeys(vaultKeys)
 	return err
 }
 
@@ -382,6 +384,7 @@ func (k ProtonPassKeyring) Keys() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer zeroBytes(encKey)
 
 	var keys []string
 	err = k.withVault(ctx, pat, encKey, func(_ *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
@@ -406,6 +409,7 @@ func (k ProtonPassKeyring) Get(key string) (Item, error) {
 	if err != nil {
 		return Item{}, err
 	}
+	defer zeroBytes(encKey)
 
 	var found bool
 	var out Item
@@ -443,6 +447,7 @@ func (k ProtonPassKeyring) Set(item Item) error {
 	if err != nil {
 		return err
 	}
+	defer zeroBytes(encKey)
 	return classifyProtonErr(k.withVault(ctx, pat, encKey, func(session *protonpass.Session, vaultKeys map[int][]byte, items []decryptedItem) error {
 		return k.setItem(ctx, session, vaultKeys, items, item)
 	}))
@@ -478,6 +483,7 @@ func (k ProtonPassKeyring) setItem(ctx context.Context, session *protonpass.Sess
 	if err != nil {
 		return err
 	}
+	defer zeroBytes(itemKey)
 	content, err := protonpass.SealItemContent(itemKey, plaintext)
 	if err != nil {
 		return err
@@ -503,6 +509,7 @@ func (k ProtonPassKeyring) Remove(key string) error {
 	if err != nil {
 		return err
 	}
+	defer zeroBytes(encKey)
 	return classifyProtonErr(k.withVault(ctx, pat, encKey, func(session *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
 		existing, ok := findItem(items, key)
 		if !ok {
@@ -510,6 +517,22 @@ func (k ProtonPassKeyring) Remove(key string) error {
 		}
 		return k.Client.DeleteItem(ctx, session, k.ShareID, existing.itemID, existing.revision)
 	}))
+}
+
+// zeroBytes overwrites b with zeros. Best-effort: Go's GC may already have copied
+// the bytes elsewhere, but clearing the live copy shrinks the window in which
+// derived key material sits in process memory.
+func zeroBytes(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
+}
+
+// zeroVaultKeys clears every decrypted share key in m.
+func zeroVaultKeys(m map[int][]byte) {
+	for _, k := range m {
+		zeroBytes(k)
+	}
 }
 
 // findItem returns the decrypted item with the given key.
