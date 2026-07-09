@@ -38,9 +38,12 @@ const (
 
 // Errors returned by the Proton Pass backend.
 var (
-	errProtonPassKeyring   = errors.New("unable to create a Proton Pass keyring")
-	ErrProtonPassNoPAT     = fmt.Errorf("%w: %w: %#v or Config.ProtonPassPAT", errProtonPassKeyring, ErrEnvUnsetOrEmpty, ProtonPassEnvPAT)
-	ErrProtonPassNoShareID = fmt.Errorf("%w: %w: %#v or Config.ProtonPassShareID", errProtonPassKeyring, ErrEnvUnsetOrEmpty, ProtonPassEnvShareID)
+	errProtonPassKeyring = errors.New("unable to create a Proton Pass keyring")
+	// errEnvUnsetOrEmpty is Proton-local so the backend does not depend on a
+	// symbol another backend defines (keyring_no1password removes opcommon.go).
+	errEnvUnsetOrEmpty     = errors.New("environment variable unset or empty")
+	ErrProtonPassNoPAT     = fmt.Errorf("%w: %w: %#v or Config.ProtonPassPAT", errProtonPassKeyring, errEnvUnsetOrEmpty, ProtonPassEnvPAT)
+	ErrProtonPassNoShareID = fmt.Errorf("%w: %w: %#v or Config.ProtonPassShareID", errProtonPassKeyring, errEnvUnsetOrEmpty, ProtonPassEnvShareID)
 
 	// ErrProtonPassShareNotAccessible is returned when the configured Share ID is
 	// not among the shares the PAT can access (usually a missing access grant).
@@ -298,7 +301,7 @@ func (k ProtonPassKeyring) loadVaultOnce(ctx context.Context, pat string, encKey
 
 	revisions, err := k.Client.ListItems(ctx, session, k.ShareID)
 	if err != nil {
-		return
+		return session, vaultKeys, items, err
 	}
 
 	for _, rev := range revisions {
@@ -309,13 +312,13 @@ func (k ProtonPassKeyring) loadVaultOnce(ctx context.Context, pat string, encKey
 		content, contentKey, cerr := k.openContent(shareKey, rev)
 		if cerr != nil {
 			err = fmt.Errorf("item %s: %w", rev.ItemID, cerr)
-			return
+			return session, vaultKeys, items, err
 		}
 		meta, perr := protonpass.ParseItemMetadata(content)
 		if perr != nil {
 			zeroBytes(contentKey) // this revision's key is not yet recorded in items
 			err = fmt.Errorf("item %s: parse: %w", rev.ItemID, perr)
-			return
+			return session, vaultKeys, items, err
 		}
 		key, ok := k.keyFromTitle(meta.Name)
 		if !ok {

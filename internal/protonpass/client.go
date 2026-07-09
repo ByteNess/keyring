@@ -38,8 +38,6 @@ const (
 	itemPageSize = 100
 	maxItemPages = 50
 	maxBodyBytes = 4 << 20
-
-	protonCodeSuccess = 1000
 )
 
 // API is the subset of the Proton Pass client the keyring backend depends on
@@ -370,7 +368,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, uid, bea
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes))
 	if err != nil {
