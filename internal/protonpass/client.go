@@ -19,7 +19,9 @@ import (
 )
 
 // Proton API defaults. The app/SDK version headers gate access; these mirror the
-// values the Proton Pass CLI sends and can be overridden via Config.
+// values the Proton Pass CLI sends and can be overridden via Config. The API is
+// unofficial, so Proton may change what it accepts and these pins can need
+// updating over time (see the experimental note in the README).
 const (
 	DefaultAPIBase     = "https://pass-api.proton.me"
 	DefaultAppVersion  = "cli-pass@2.1.4"
@@ -268,11 +270,14 @@ func (c *Client) ListItems(ctx context.Context, s *Session, shareID string) ([]I
 		}
 		all = append(all, resp.Items.RevisionsData...)
 		if resp.Items.LastToken == "" || len(resp.Items.RevisionsData) == 0 {
-			break
+			return all, nil
 		}
 		since = resp.Items.LastToken
 	}
-	return all, nil
+	// A token is still outstanding after the page cap: the share holds more items
+	// than we will read. Returning the partial list would make Keys() incomplete
+	// and let Set create a duplicate of an item past the cutoff, so fail loudly.
+	return nil, fmt.Errorf("list items in share %q: more than %d items (reached the %d-page cap); refusing to return a truncated list", shareID, maxItemPages*itemPageSize, maxItemPages)
 }
 
 // GetShareKeys returns the (still-encrypted) key rotations for a share.

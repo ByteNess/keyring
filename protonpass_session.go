@@ -12,8 +12,12 @@ import (
 )
 
 const (
-	// protonSessionServiceName is the keychain service under which cached Proton
-	// sessions live, kept separate from any aws-vault credential items.
+	// protonSessionServiceName is the fixed keychain service under which cached
+	// Proton sessions live, kept separate from any aws-vault credential items. It is
+	// intentionally not derived from Config.ServiceName: the cache entry is already
+	// scoped per API base and PAT (see protonSessionAccount), so one shared store
+	// lets every aws-vault config reuse a single login for the same token rather
+	// than re-authenticating per service name.
 	protonSessionServiceName = "aws-vault-proton-pass-session"
 
 	// protonSessionFallbackTTL bounds reuse of a cached session when the server
@@ -26,9 +30,10 @@ const (
 	// token does not die mid-operation.
 	protonSessionExpirySkew = 60 * time.Second
 
-	// protonSessionMaxPlausibleLifetime is the largest server expiry treated as a
-	// real timestamp. Anything further out (e.g. a millisecond epoch mistaken for
-	// seconds) is implausible for an access token and falls back to the local TTL.
+	// protonSessionMaxPlausibleLifetime bounds how far from now a server expiry may
+	// sit, in either direction, to be treated as a real timestamp. A value far in the
+	// future (a millisecond epoch mistaken for seconds) or far in the past (a duration
+	// mistaken for an epoch) is implausible and falls back to the local TTL.
 	protonSessionMaxPlausibleLifetime = 30 * 24 * time.Hour
 )
 
@@ -81,16 +86,19 @@ func (cs cachedSession) toSession() *protonpass.Session {
 }
 
 // fresh reports whether the cached session can still be reused. It trusts the
-// server expiry only when it is a plausible future epoch (bounded above to guard
-// against a duration or a millisecond epoch); otherwise it falls back to a local
-// TTL. Either way a wrongly-fresh session is caught by the 401 re-exchange path.
+// server expiry whenever it is a plausible epoch (within the max lifetime of now in
+// either direction, so a small duration-like value or a millisecond epoch falls
+// through); a real past or imminent expiry then reads as not-fresh. Only an absent
+// or implausible expiry falls back to the local TTL. Either way a wrongly-fresh
+// session is caught by the 401 re-exchange path.
 func (cs cachedSession) fresh(now time.Time) bool {
 	if cs.AccessToken == "" {
 		return false
 	}
 	nowUnix := now.Unix()
+	minPlausible := now.Add(-protonSessionMaxPlausibleLifetime).Unix()
 	maxPlausible := now.Add(protonSessionMaxPlausibleLifetime).Unix()
-	if cs.AccessExpiry > nowUnix && cs.AccessExpiry <= maxPlausible {
+	if cs.AccessExpiry >= minPlausible && cs.AccessExpiry <= maxPlausible {
 		return nowUnix+int64(protonSessionExpirySkew.Seconds()) < cs.AccessExpiry
 	}
 	return now.Before(time.Unix(cs.CachedAt, 0).Add(protonSessionFallbackTTL))

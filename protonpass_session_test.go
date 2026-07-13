@@ -45,6 +45,7 @@ func TestCachedSessionFresh(t *testing.T) {
 		{"future epoch beyond skew", cachedSession{AccessToken: "a", AccessExpiry: now.Unix() + 3600}, true},
 		{"future epoch within skew", cachedSession{AccessToken: "a", AccessExpiry: now.Unix() + 30}, false},
 		{"duration-like value falls back to TTL", cachedSession{AccessToken: "a", AccessExpiry: 3600, CachedAt: now.Unix()}, true},
+		{"recent past epoch is not fresh, not TTL fallback", cachedSession{AccessToken: "a", AccessExpiry: now.Unix() - 300, CachedAt: now.Add(-30 * time.Minute).Unix()}, false},
 		{"implausibly far epoch falls back to TTL", cachedSession{AccessToken: "a", AccessExpiry: now.Add(60 * 24 * time.Hour).Unix(), CachedAt: now.Unix()}, true},
 		{"no expiry, fresh within TTL", cachedSession{AccessToken: "a", CachedAt: now.Unix() - 60}, true},
 		{"no expiry, stale past TTL", cachedSession{AccessToken: "a", CachedAt: now.Add(-2 * time.Hour).Unix()}, false},

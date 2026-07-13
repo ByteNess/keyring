@@ -536,3 +536,24 @@ func TestProtonPassKeyringGetMetadata(t *testing.T) {
 		t.Fatalf("GetMetadata err = %v, want ErrMetadataNeedsCredentials", err)
 	}
 }
+
+func TestFindItem(t *testing.T) {
+	items := []decryptedItem{
+		{key: "a", itemID: "1"},
+		{key: "b", itemID: "2"},
+		{key: "b", itemID: "3"},
+	}
+
+	if _, ok, err := findItem(items, "missing"); ok || err != nil {
+		t.Fatalf("absent key: ok=%v err=%v, want ok=false err=nil", ok, err)
+	}
+
+	got, ok, err := findItem(items, "a")
+	if !ok || err != nil || got.itemID != "1" {
+		t.Fatalf("unique key: itemID=%q ok=%v err=%v, want itemID=1 ok=true err=nil", got.itemID, ok, err)
+	}
+
+	if _, ok, err := findItem(items, "b"); ok || err == nil {
+		t.Fatalf("duplicate key: ok=%v err=%v, want ok=false err!=nil", ok, err)
+	}
+}

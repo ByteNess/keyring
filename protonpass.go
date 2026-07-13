@@ -333,6 +333,11 @@ func (k ProtonPassKeyring) loadVaultOnce(ctx context.Context, pat string, encKey
 			contentKey:  contentKey,
 		})
 	}
+	// Stable order (item IDs are unique) so Get and the Set duplicate check do not
+	// depend on the order the API returned revisions in.
+	slices.SortFunc(items, func(a, b decryptedItem) int {
+		return strings.Compare(a.itemID, b.itemID)
+	})
 	return session, vaultKeys, items, nil
 }
 
@@ -416,8 +421,13 @@ func (k ProtonPassKeyring) Keys() ([]string, error) {
 
 	var keys []string
 	err = k.withVault(ctx, pat, encKey, func(_ *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
+		seen := make(map[string]struct{}, len(items))
 		keys = make([]string, 0, len(items))
 		for _, it := range items {
+			if _, dup := seen[it.key]; dup {
+				continue
+			}
+			seen[it.key] = struct{}{}
 			keys = append(keys, it.key)
 		}
 		slices.Sort(keys)
@@ -492,7 +502,11 @@ func (k ProtonPassKeyring) setItem(ctx context.Context, session *protonpass.Sess
 	plaintext := protonpass.EncodeItem(
 		protonpass.ItemMetadata{Name: k.itemTitle(item.Key), Note: string(item.Data)}, uuid)
 
-	if existing, ok := findItem(items, item.Key); ok {
+	existing, ok, err := findItem(items, item.Key)
+	if err != nil {
+		return err
+	}
+	if ok {
 		content, err := protonpass.SealItemContent(existing.contentKey, plaintext)
 		if err != nil {
 			return err
@@ -542,7 +556,10 @@ func (k ProtonPassKeyring) Remove(key string) error {
 	ctx, cancel := k.opContext()
 	defer cancel()
 	return classifyProtonErr(k.withVault(ctx, pat, encKey, func(session *protonpass.Session, _ map[int][]byte, items []decryptedItem) error {
-		existing, ok := findItem(items, key)
+		existing, ok, err := findItem(items, key)
+		if err != nil {
+			return err
+		}
 		if !ok {
 			return ErrKeyNotFound
 		}
@@ -577,13 +594,23 @@ func zeroItems(items []decryptedItem) {
 }
 
 // findItem returns the decrypted item with the given key.
-func findItem(items []decryptedItem, key string) (decryptedItem, bool) {
+// findItem returns the item for key. ok is false when none matches; err is
+// non-nil when more than one item shares the key, which the caller must not
+// resolve by guessing - the duplicate has to be cleared in Proton Pass.
+func findItem(items []decryptedItem, key string) (item decryptedItem, ok bool, err error) {
+	var matches int
 	for _, it := range items {
 		if it.key == key {
-			return it, true
+			if matches == 0 {
+				item = it
+			}
+			matches++
 		}
 	}
-	return decryptedItem{}, false
+	if matches > 1 {
+		return decryptedItem{}, false, fmt.Errorf("proton-pass backend: %d items for key %q in the vault; remove the duplicate before writing", matches, key)
+	}
+	return item, matches == 1, nil
 }
 
 // currentRotation returns the highest share-key rotation and its key, the rotation
