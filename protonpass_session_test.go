@@ -21,7 +21,7 @@ func TestKeyringSessionStoreRoundTrip(t *testing.T) {
 	}
 
 	cs := cachedSession{UID: "u", AccessToken: "tok", AccessExpiry: 123, CachedAt: 456}
-	store.save("acct", cs)
+	store.save("acct", cs, time.Now())
 
 	got, ok := store.load("acct")
 	if !ok || got != cs {
@@ -34,19 +34,25 @@ func TestKeyringSessionStoreRoundTrip(t *testing.T) {
 	}
 }
 
-func TestKeyringSessionStorePrunesSupersededPAT(t *testing.T) {
+func TestKeyringSessionStorePrunesStaleNotFresh(t *testing.T) {
 	store := &keyringSessionStore{kr: NewArrayKeyring(nil)}
+	now := time.Unix(1_700_000_000, 0)
 
-	// An old PAT's session, then a rotated PAT that hashes to a new account.
-	store.save("old-account", cachedSession{UID: "u1", AccessToken: "old-bearer", CachedAt: 1})
-	store.save("new-account", cachedSession{UID: "u2", AccessToken: "new-bearer", CachedAt: 2})
+	// A stale session from a rotated/old PAT (well past the fallback TTL).
+	store.save("stale-account", cachedSession{AccessToken: "dead", CachedAt: now.Add(-2 * time.Hour).Unix()}, now)
+	// A concurrently-active session for another PAT (still fresh).
+	store.save("live-account", cachedSession{AccessToken: "live", AccessExpiry: now.Add(time.Hour).Unix(), CachedAt: now.Unix()}, now)
+	// Saving the current PAT's session prunes the stale entry but not the live one.
+	store.save("current-account", cachedSession{AccessToken: "current", AccessExpiry: now.Add(time.Hour).Unix(), CachedAt: now.Unix()}, now)
 
-	if _, ok := store.load("old-account"); ok {
-		t.Fatal("superseded session still loadable; the old PAT's entry was not pruned")
+	if _, ok := store.load("stale-account"); ok {
+		t.Error("stale (dead-token) session was not pruned on save")
 	}
-	got, ok := store.load("new-account")
-	if !ok || got.AccessToken != "new-bearer" {
-		t.Fatalf("current session load = %+v ok=%v, want the new bearer token", got, ok)
+	if _, ok := store.load("live-account"); !ok {
+		t.Error("concurrently-active (fresh) session was wrongly pruned")
+	}
+	if _, ok := store.load("current-account"); !ok {
+		t.Error("current session missing after save")
 	}
 }
 
@@ -288,7 +294,7 @@ func TestProtonPassSetRetriesLoadIssuesWriteOnce(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	store := &keyringSessionStore{kr: NewArrayKeyring(nil)}
 	account := protonSessionAccount("", fx.pat)
-	store.save(account, newCachedSession(&protonpass.Session{UID: "stale", AccessToken: "stale-token"}, now))
+	store.save(account, newCachedSession(&protonpass.Session{UID: "stale", AccessToken: "stale-token"}, now), now)
 
 	var authCalls, shareCalls, createCalls int
 	m := readMock(fx)
@@ -331,7 +337,7 @@ func TestProtonPassWritePhase401NotRetried(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	store := &keyringSessionStore{kr: NewArrayKeyring(nil)}
 	account := protonSessionAccount("", fx.pat)
-	store.save(account, newCachedSession(&protonpass.Session{UID: "u", AccessToken: "good-token"}, now))
+	store.save(account, newCachedSession(&protonpass.Session{UID: "u", AccessToken: "good-token"}, now), now)
 
 	var authCalls, createCalls int
 	m := readMock(fx)
@@ -393,7 +399,7 @@ func TestProtonPassSessionCacheRetriesOn401(t *testing.T) {
 	store := &keyringSessionStore{kr: NewArrayKeyring(nil)}
 
 	account := protonSessionAccount("", fx.pat)
-	store.save(account, newCachedSession(&protonpass.Session{UID: "stale", AccessToken: "stale-token"}, now))
+	store.save(account, newCachedSession(&protonpass.Session{UID: "stale", AccessToken: "stale-token"}, now), now)
 
 	var authCalls, shareCalls int
 	m := readMock(fx)

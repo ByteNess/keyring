@@ -53,7 +53,7 @@ var protonSecureSessionBackends = []BackendType{
 // must never fail the underlying keyring operation.
 type protonSessionStore interface {
 	load(account string) (cachedSession, bool)
-	save(account string, cs cachedSession)
+	save(account string, cs cachedSession, now time.Time)
 	invalidate(account string)
 }
 
@@ -123,7 +123,7 @@ func (s *keyringSessionStore) load(account string) (cachedSession, bool) {
 	return cs, true
 }
 
-func (s *keyringSessionStore) save(account string, cs cachedSession) {
+func (s *keyringSessionStore) save(account string, cs cachedSession, now time.Time) {
 	data, err := json.Marshal(cs)
 	if err != nil {
 		return
@@ -136,15 +136,20 @@ func (s *keyringSessionStore) save(account string, cs cachedSession) {
 	}); err != nil {
 		return
 	}
-	// A rotated PAT hashes to a new account, so evict every other cached session:
-	// a superseded entry is a live bearer token that would otherwise linger in the
-	// keychain. Best-effort; a failure here must not fail the caller's operation.
+	// A rotated PAT hashes to a new account, leaving its old session behind. Evict
+	// only the stale ones: a dead token is the security concern, while a still-fresh
+	// entry may be a concurrently-active session for another PAT, and removing it
+	// would force that PAT to re-exchange on every op and risk the login rate limit.
+	// Best-effort; a failure here must not fail the caller's operation.
 	keys, err := s.kr.Keys()
 	if err != nil {
 		return
 	}
 	for _, k := range keys {
-		if k != account {
+		if k == account {
+			continue
+		}
+		if other, ok := s.load(k); !ok || !other.fresh(now) {
 			_ = s.kr.Remove(k)
 		}
 	}

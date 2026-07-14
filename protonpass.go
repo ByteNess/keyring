@@ -191,7 +191,8 @@ func (k ProtonPassKeyring) authSession(ctx context.Context, pat string, forceFre
 		return nil, err
 	}
 	if k.cache != nil {
-		k.cache.save(account, newCachedSession(session, k.now()))
+		now := k.now()
+		k.cache.save(account, newCachedSession(session, now), now)
 	}
 	return session, nil
 }
