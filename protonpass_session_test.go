@@ -34,6 +34,22 @@ func TestKeyringSessionStoreRoundTrip(t *testing.T) {
 	}
 }
 
+func TestKeyringSessionStorePrunesSupersededPAT(t *testing.T) {
+	store := &keyringSessionStore{kr: NewArrayKeyring(nil)}
+
+	// An old PAT's session, then a rotated PAT that hashes to a new account.
+	store.save("old-account", cachedSession{UID: "u1", AccessToken: "old-bearer", CachedAt: 1})
+	store.save("new-account", cachedSession{UID: "u2", AccessToken: "new-bearer", CachedAt: 2})
+
+	if _, ok := store.load("old-account"); ok {
+		t.Fatal("superseded session still loadable; the old PAT's entry was not pruned")
+	}
+	got, ok := store.load("new-account")
+	if !ok || got.AccessToken != "new-bearer" {
+		t.Fatalf("current session load = %+v ok=%v, want the new bearer token", got, ok)
+	}
+}
+
 func TestCachedSessionFresh(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	tests := []struct {

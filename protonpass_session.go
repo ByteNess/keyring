@@ -128,12 +128,26 @@ func (s *keyringSessionStore) save(account string, cs cachedSession) {
 	if err != nil {
 		return
 	}
-	_ = s.kr.Set(Item{
+	if err := s.kr.Set(Item{
 		Key:         account,
 		Data:        data,
 		Label:       protonSessionServiceName,
 		Description: "aws-vault cached Proton Pass session",
-	})
+	}); err != nil {
+		return
+	}
+	// A rotated PAT hashes to a new account, so evict every other cached session:
+	// a superseded entry is a live bearer token that would otherwise linger in the
+	// keychain. Best-effort; a failure here must not fail the caller's operation.
+	keys, err := s.kr.Keys()
+	if err != nil {
+		return
+	}
+	for _, k := range keys {
+		if k != account {
+			_ = s.kr.Remove(k)
+		}
+	}
 }
 
 func (s *keyringSessionStore) invalidate(account string) {
