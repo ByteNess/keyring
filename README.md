@@ -86,6 +86,37 @@ if err != nil {
 
 For more detail on the API please check [the keyring godocs](https://godoc.org/github.com/byteness/keyring)
 
+### Proton Pass backend
+
+> **Experimental.** The `proton-pass` backend targets Proton's Pass API, which is
+> unofficial and undocumented: it can change without notice and break this backend.
+> Treat it as beta, pin your dependency, and re-test after upgrades. It is gated behind
+> the `keyring_noprotonpass` build tag (see below) and excluded from opt-out builds.
+
+The `proton-pass` backend stores each secret as an item in a Proton Pass vault,
+authenticated with a Proton Personal Access Token (PAT) of the form `pst_<token>::<key>`,
+so no browser and no `pass-cli` subprocess are involved. Item content is decrypted
+client-side (AES-256-GCM down Proton's key hierarchy). Because the API is reverse
+engineered, the client sends app/SDK version headers mirroring the Proton Pass CLI (for
+example `cli-pass@2.1.4`); Proton may change what it accepts, so those pins can need
+updating over time.
+
+```go
+ring, err := keyring.Open(keyring.Config{
+  ServiceName: "example",
+  AllowedBackends: []keyring.BackendType{
+    keyring.ProtonPassBackend,
+  },
+  ProtonPassShareID: "<share-id>",
+})
+if err != nil {
+  return err
+}
+```
+
+The PAT is read from the `PROTON_PASS_PERSONAL_ACCESS_TOKEN` environment variable (or a
+configured token function), never a command-line flag.
+
 ### Reducing the dependency surface (opt-out build tags)
 
 The cross-platform backends compile into every build, whether or not you use

@@ -98,4 +98,27 @@ type Config struct {
 
 	// OPDesktopAccountID is the 1Password account name or UUIDj for Desktop Integration (1Password Desktop App only)
 	OPDesktopAccountID string
+
+	// ProtonPassPAT is the Proton Pass Personal Access Token ("pst_<token>::<key>").
+	// The "pst_<token>" half authenticates; the "::<key>" half is the client-side
+	// vault-unwrap key. Falls back to the PROTON_PASS_PERSONAL_ACCESS_TOKEN env var.
+	ProtonPassPAT string
+
+	// ProtonPassShareID is the Share ID of the Proton Pass vault that aws-vault uses.
+	// Falls back to the PROTON_PASS_SHARE_ID env var.
+	ProtonPassShareID string
+
+	// ProtonPassItemTitlePrefix is the prefix to prepend to Proton Pass item titles.
+	ProtonPassItemTitlePrefix string
+
+	// ProtonPassAPIBase overrides the Proton API base URL (default https://pass-api.proton.me).
+	ProtonPassAPIBase string
+
+	// ProtonPassTimeout is the per-operation timeout for Proton Pass API calls. Zero
+	// selects a built-in default.
+	ProtonPassTimeout time.Duration
+
+	// ProtonPassTokenFunc is an optional function used to prompt for the PAT when no
+	// config field or environment variable supplies one.
+	ProtonPassTokenFunc PromptFunc
 }
