@@ -22,6 +22,7 @@ Currently Keyring supports the following backends
  * [1Password Connect](https://developer.1password.com/docs/connect/)
  * [1Password Service Accounts](https://developer.1password.com/docs/service-accounts)
  * [1Password Desktop Application Integration](https://developer.1password.com/docs/sdks/desktop-app-integrations/)
+ * [Proton Pass](https://proton.me/pass) **Experimental**
 
 ## Usage
 
