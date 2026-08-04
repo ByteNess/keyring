@@ -1,4 +1,4 @@
-//go:build ios && cgo
+//go:build ios
 
 // NOTE: Due to newer versions of Go's crypto library requiring SecTrustCopyCertificateChain,
 // this requires iOS 15.0 or later.
