@@ -12,13 +12,13 @@ require (
 	github.com/byteness/go-libsecret v0.0.0-20260108215642-107379d3dee0
 	github.com/byteness/percent v0.2.2
 	github.com/danieljoos/wincred v1.2.3
-	github.com/dvsekhvalnov/jose2go v1.8.0
+	github.com/dvsekhvalnov/jose2go v1.10.0
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/noamcohen97/touchid-go v0.3.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
