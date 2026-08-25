@@ -15,7 +15,7 @@ require (
 	github.com/dvsekhvalnov/jose2go v1.10.0
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/noamcohen97/touchid-go v0.3.0
-	github.com/stretchr/testify v1.12.0
+	github.com/stretchr/testify v1.12.1
 	golang.org/x/sys v0.47.0
 	golang.org/x/term v0.45.0
 	google.golang.org/protobuf v1.36.12
@@ -35,5 +35,5 @@ require (
 	github.com/uber/jaeger-lib v2.4.1+incompatible // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 )
