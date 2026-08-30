@@ -44,11 +44,9 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		if passage.identitiesFile != "" {
-			passage.identitiesFile, err = ExpandTilde(passage.identitiesFile)
-			if err != nil {
-				return nil, err
-			}
+		passage.identitiesFile, err = ExpandTilde(passage.identitiesFile)
+		if err != nil {
+			return nil, err
 		}
 
 		// fail if the pass program is not available
@@ -70,9 +68,7 @@ type passageKeyring struct {
 
 func (k *passageKeyring) pass(args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(context.Background(), k.passcmd, args...)
-	if k.dir != "" || k.identitiesFile != "" {
-		cmd.Env = os.Environ()
-	}
+	cmd.Env = os.Environ()
 	if k.dir != "" {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("PASSAGE_DIR=%s", k.dir))
 	}
