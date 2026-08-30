@@ -18,9 +18,10 @@ func init() {
 		var err error
 
 		passage := &passageKeyring{
-			passcmd: cfg.PassCmd,
-			dir:     cfg.PassDir,
-			prefix:  cfg.PassPrefix,
+			passcmd:        cfg.PassCmd,
+			dir:            cfg.PassDir,
+			prefix:         cfg.PassPrefix,
+			identitiesFile: cfg.PassageIdentitiesFile,
 		}
 
 		if passage.passcmd == "" {
@@ -43,6 +44,10 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
+		passage.identitiesFile, err = ExpandTilde(passage.identitiesFile)
+		if err != nil {
+			return nil, err
+		}
 
 		// fail if the pass program is not available
 		_, err = exec.LookPath(passage.passcmd)
@@ -55,15 +60,20 @@ func init() {
 }
 
 type passageKeyring struct {
-	dir     string
-	passcmd string
-	prefix  string
+	dir            string
+	passcmd        string
+	prefix         string
+	identitiesFile string
 }
 
 func (k *passageKeyring) pass(args ...string) *exec.Cmd {
 	cmd := exec.CommandContext(context.Background(), k.passcmd, args...)
+	cmd.Env = os.Environ()
 	if k.dir != "" {
-		cmd.Env = append(os.Environ(), fmt.Sprintf("PASSAGE_DIR=%s", k.dir))
+		cmd.Env = append(cmd.Env, fmt.Sprintf("PASSAGE_DIR=%s", k.dir))
+	}
+	if k.identitiesFile != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("PASSAGE_IDENTITIES_FILE=%s", k.identitiesFile))
 	}
 	cmd.Stderr = os.Stderr
 

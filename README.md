@@ -51,6 +51,24 @@ keyring.Config.TouchIDAccount = "cc.byteness.aws-vault.biometrics"
 keyring.Config.TouchIDService = "aws-vault"
 ```
 
+### Passage backend
+
+The Passage backend can select an identities file per keyring instance. If
+`PassageIdentitiesFile` is empty, Passage uses `PASSAGE_IDENTITIES_FILE` or its
+own default.
+
+```go
+ring, err := keyring.Open(keyring.Config{
+  AllowedBackends: []keyring.BackendType{keyring.PassageBackend},
+  PassDir: "~/.passage/store",
+  PassPrefix: "example",
+  PassageIdentitiesFile: "~/.passage/identities",
+})
+if err != nil {
+  return err
+}
+```
+
 ### Windows Hello backend
 
 The `winhello` backend stores encrypted envelopes in Windows Credential Manager.

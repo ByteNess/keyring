@@ -57,6 +57,9 @@ type Config struct {
 	// PassPrefix is a string prefix to prepend to the item path stored in pass
 	PassPrefix string
 
+	// PassageIdentitiesFile is the identities file used by passage only, ~/ is resolved to the users' home dir
+	PassageIdentitiesFile string
+
 	// WinCredPrefix is a string prefix to prepend to the key name
 	WinCredPrefix string
 

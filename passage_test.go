@@ -65,6 +65,36 @@ func TestPassageKeyringSetWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestPassageKeyringUsesConfiguredIdentitiesFile(t *testing.T) {
+	k, teardown := passageSetup(t)
+	defer teardown(t)
+
+	identityFile := os.Getenv("PASSAGE_IDENTITIES_FILE")
+	t.Setenv("PASSAGE_IDENTITIES_FILE", filepath.Join(filepath.Dir(k.dir), "missing-identities"))
+	ring, err := Open(Config{
+		AllowedBackends:       []BackendType{PassageBackend},
+		PassDir:               k.dir,
+		PassPrefix:            k.prefix,
+		PassageIdentitiesFile: identityFile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	item := Item{Key: "llamas", Data: []byte("llamas are great")}
+	if err := ring.Set(item); err != nil {
+		t.Fatal(err)
+	}
+
+	foundItem, err := ring.Get(item.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(foundItem.Data, item.Data) {
+		t.Fatalf("Value stored was not the value retrieved: %q", foundItem.Data)
+	}
+}
+
 func TestPassageKeyringKeysWhenEmpty(t *testing.T) {
 	k, teardown := passageSetup(t)
 	defer teardown(t)
