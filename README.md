@@ -64,6 +64,9 @@ ring, err := keyring.Open(keyring.Config{
   PassPrefix: "example",
   PassageIdentitiesFile: "~/.passage/identities",
 })
+if err != nil {
+  return err
+}
 ```
 
 ### Windows Hello backend
