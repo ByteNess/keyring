@@ -1,6 +1,6 @@
 module github.com/byteness/keyring
 
-go 1.26
+go 1.26.0
 
 // v1.6.0 was a broken test
 retract v1.6.0
@@ -16,7 +16,7 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/noamcohen97/touchid-go v0.3.0
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.48.0
 	golang.org/x/term v0.45.0
 	google.golang.org/protobuf v1.36.12
 )
