@@ -28,10 +28,19 @@ type keychain struct {
 	isAccessibleWhenUnlocked bool
 	isTrusted                bool
 
-	isTouchIDAuthenticated bool
-	useTouchID             bool
-	touchIDAccount         string
-	touchIDService         string
+	useTouchID     bool
+	touchIDAccount string
+	touchIDService string
+
+	// authenticateFn overrides the biometric check in tests; nil selects touchid.Authenticate.
+	authenticateFn func(ctx context.Context, policy touchid.Policy, reason string) error
+}
+
+func (k *keychain) authenticate(ctx context.Context, policy touchid.Policy, reason string) error {
+	if k.authenticateFn != nil {
+		return k.authenticateFn(ctx, policy, reason)
+	}
+	return touchid.Authenticate(ctx, policy, reason)
 }
 
 func init() {
@@ -46,8 +55,6 @@ func init() {
 			// which is a shorthand for setting the accessibility value.
 			// See: https://developer.apple.com/documentation/security/ksecattraccessiblewhenunlocked
 			isAccessibleWhenUnlocked: cfg.KeychainAccessibleWhenUnlocked,
-
-			isTouchIDAuthenticated: false,
 		}
 		if cfg.UseBiometrics {
 			switch {
@@ -72,27 +79,20 @@ func init() {
 	})
 }
 
-// ensureUnlocked triggers Touch ID authentication and keychain unlock when
-// biometrics are enabled. It is safe to call before any keychain operation —
-// it returns immediately (no-op) when:
-//   - no custom keychain path is configured
-//   - biometrics are not enabled
-//   - Touch ID has already succeeded in this process
-//   - the keychain file does not exist yet
+// ensureUnlocked unlocks the custom keychain via Touch ID, but only when the
+// OS reports it as locked.
 func (k *keychain) ensureUnlocked() error {
-	if k.path == "" || !k.useTouchID || k.isTouchIDAuthenticated {
+	if k.path == "" || !k.useTouchID {
 		return nil
 	}
-	kc := gokeychain.NewWithPath(k.path)
-	if err := kc.Status(); err != nil {
-		if errors.Is(err, gokeychain.ErrorNoSuchKeychain) {
-			// Keychain doesn't exist yet — nothing to unlock.
-			// Don't try to create it here; creation belongs to the Set path.
-			return nil
-		}
+	locked, err := gokeychain.NewWithPath(k.path).IsLocked()
+	if errors.Is(err, gokeychain.ErrorNoSuchKeychain) {
+		return nil // creation belongs to the Set path
+	}
+	if err != nil || !locked {
 		return err
 	}
-	_, err := k.openWithTouchID()
+	_, err = k.openWithTouchID()
 	return err
 }
 
@@ -346,8 +346,8 @@ func (k *keychain) createOrOpen() (gokeychain.Keychain, error) {
 	debugf("Checking keychain status")
 	err := kc.Status()
 	if err == nil {
-		if k.useTouchID {
-			return k.openWithTouchID()
+		if err := k.ensureUnlocked(); err != nil {
+			return gokeychain.Keychain{}, err
 		}
 		debugf("Keychain status returned nil, keychain exists")
 		return kc, nil
@@ -374,17 +374,10 @@ func (k *keychain) createOrOpen() (gokeychain.Keychain, error) {
 }
 
 func (k *keychain) openWithTouchID() (gokeychain.Keychain, error) {
-	if k.isTouchIDAuthenticated {
-		// already unlocked, return keychain
-		return gokeychain.NewWithPath(k.path), nil
-	}
-
 	debugf("checking with touchid")
-	if err := touchid.Authenticate(context.Background(), touchid.PolicyDeviceOwnerAuthentication, "unlock "+k.path); err != nil {
+	if err := k.authenticate(context.Background(), touchid.PolicyDeviceOwnerAuthentication, "unlock "+k.path); err != nil {
 		return gokeychain.Keychain{}, fmt.Errorf("failed to authenticate with biometrics: %w", err)
 	}
-
-	k.isTouchIDAuthenticated = true
 
 	debugf("looking up %s password in login.keychain", k.path)
 	query := gokeychain.NewItem()

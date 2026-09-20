@@ -4,12 +4,16 @@
 package keyring
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
+
+	gokeychain "github.com/byteness/go-keychain"
+	"github.com/noamcohen97/touchid-go"
 )
 
 func TestOSXKeychainKeyringSet(t *testing.T) {
@@ -281,12 +285,13 @@ func TestEnsureUnlockedNoOpWhenNoPath(t *testing.T) {
 		useTouchID: true,
 		service:    "test",
 		isTrusted:  true,
+		authenticateFn: func(context.Context, touchid.Policy, string) error {
+			t.Fatal("authenticateFn should not be called when path is empty")
+			return nil
+		},
 	}
 	if err := k.ensureUnlocked(); err != nil {
 		t.Fatalf("ensureUnlocked should be a no-op when path is empty, got: %v", err)
-	}
-	if k.isTouchIDAuthenticated {
-		t.Fatal("isTouchIDAuthenticated should remain false when path is empty")
 	}
 }
 
@@ -298,27 +303,13 @@ func TestEnsureUnlockedNoOpWhenBiometricsDisabled(t *testing.T) {
 		useTouchID: false, // biometrics not enabled
 		service:    "test",
 		isTrusted:  true,
+		authenticateFn: func(context.Context, touchid.Policy, string) error {
+			t.Fatal("authenticateFn should not be called when biometrics are disabled")
+			return nil
+		},
 	}
 	if err := k.ensureUnlocked(); err != nil {
 		t.Fatalf("ensureUnlocked should be a no-op when useTouchID is false, got: %v", err)
-	}
-	if k.isTouchIDAuthenticated {
-		t.Fatal("isTouchIDAuthenticated should remain false when biometrics are disabled")
-	}
-}
-
-// TestEnsureUnlockedNoOpWhenAlreadyAuthenticated verifies that ensureUnlocked
-// returns immediately when Touch ID has already succeeded in this process.
-func TestEnsureUnlockedNoOpWhenAlreadyAuthenticated(t *testing.T) {
-	k := &keychain{
-		path:                   "/tmp/test.keychain",
-		useTouchID:             true,
-		service:                "test",
-		isTrusted:              true,
-		isTouchIDAuthenticated: true, // already authenticated
-	}
-	if err := k.ensureUnlocked(); err != nil {
-		t.Fatalf("ensureUnlocked should be a no-op when already authenticated, got: %v", err)
 	}
 }
 
@@ -332,14 +323,104 @@ func TestEnsureUnlockedNoOpWhenKeychainDoesNotExist(t *testing.T) {
 		service:    "test",
 		isTrusted:  true,
 	}
-	// The keychain doesn't exist, so kc.Status() returns ErrorNoSuchKeychain.
+	// The keychain doesn't exist, so IsLocked() returns ErrorNoSuchKeychain.
 	// ensureUnlocked should treat this as a no-op (return nil), letting each
 	// method's existing error handling deal with a missing keychain.
 	if err := k.ensureUnlocked(); err != nil {
 		t.Fatalf("ensureUnlocked should return nil for ErrorNoSuchKeychain, got: %v", err)
 	}
-	if k.isTouchIDAuthenticated {
-		t.Fatal("isTouchIDAuthenticated should remain false when keychain doesn't exist")
+}
+
+// TestEnsureUnlockedNoOpWhenUnlocked verifies that ensureUnlocked does not
+// prompt for Touch ID when the OS reports the keychain as already unlocked.
+func TestEnsureUnlockedNoOpWhenUnlocked(t *testing.T) {
+	path := tempPath()
+	defer deleteKeychain(t, path)
+
+	k := &keychain{
+		path:         path,
+		useTouchID:   true,
+		passwordFunc: FixedStringPrompt("test password"),
+		service:      "test",
+		isTrusted:    true,
+		authenticateFn: func(context.Context, touchid.Policy, string) error {
+			t.Fatal("authenticateFn should not be called on an unlocked keychain")
+			return nil
+		},
+	}
+	if _, err := k.createOrOpen(); err != nil {
+		t.Fatalf("createOrOpen failed: %v", err)
+	}
+	// createOrOpen leaves a freshly created keychain unlocked.
+	if err := k.ensureUnlocked(); err != nil {
+		t.Fatalf("ensureUnlocked should be a no-op on an unlocked keychain, got: %v", err)
+	}
+}
+
+// TestEnsureUnlockedPromptsWhenLocked verifies that ensureUnlocked prompts for
+// Touch ID exactly once when the OS reports the keychain as locked, and stays
+// silent for further calls once it is unlocked again — the property aws-vault
+// depends on, since Keys() is called repeatedly per command.
+func TestEnsureUnlockedPromptsWhenLocked(t *testing.T) {
+	path := tempPath()
+	defer deleteKeychain(t, path)
+
+	const passphrase = "test password"
+	touchIDAccount := fmt.Sprintf("test-account-%d", time.Now().UnixNano())
+	touchIDService := fmt.Sprintf("test-service-%d", time.Now().UnixNano())
+
+	k := &keychain{
+		path:           path,
+		useTouchID:     true,
+		passwordFunc:   FixedStringPrompt(passphrase),
+		service:        "test",
+		isTrusted:      true,
+		touchIDAccount: touchIDAccount,
+		touchIDService: touchIDService,
+	}
+	if _, err := k.createOrOpen(); err != nil {
+		t.Fatalf("createOrOpen failed: %v", err)
+	}
+
+	// Seed the login-keychain item openWithTouchID expects to find, so the
+	// test exercises the real unlock path without going through setupTouchID
+	// (which would otherwise prompt and write to the developer's real login
+	// keychain).
+	seed := gokeychain.NewItem()
+	seed.SetSecClass(gokeychain.SecClassGenericPassword)
+	seed.SetService(touchIDService)
+	seed.SetAccount(touchIDAccount)
+	seed.SetLabel(fmt.Sprintf(touchIDLabel, path))
+	seed.SetData([]byte(passphrase))
+	if err := gokeychain.AddItem(seed); err != nil {
+		t.Fatalf("failed to seed login-keychain item: %v", err)
+	}
+	defer gokeychain.DeleteGenericPasswordItem(touchIDService, touchIDAccount)
+
+	authCount := 0
+	k.authenticateFn = func(context.Context, touchid.Policy, string) error {
+		authCount++
+		return nil
+	}
+
+	if err := gokeychain.LockAtPath(path); err != nil {
+		t.Fatalf("failed to lock keychain: %v", err)
+	}
+	if err := k.ensureUnlocked(); err != nil {
+		t.Fatalf("ensureUnlocked failed: %v", err)
+	}
+	if authCount != 1 {
+		t.Fatalf("expected exactly 1 Touch ID prompt, got %d", authCount)
+	}
+
+	// Further operations against the now-unlocked keychain must not prompt again.
+	for i := 0; i < 3; i++ {
+		if err := k.ensureUnlocked(); err != nil {
+			t.Fatalf("ensureUnlocked failed on call %d: %v", i, err)
+		}
+	}
+	if authCount != 1 {
+		t.Fatalf("expected auth count to stay at 1, got %d", authCount)
 	}
 }
 
