@@ -51,6 +51,10 @@ keyring.Config.TouchIDAccount = "cc.byteness.aws-vault.biometrics"
 keyring.Config.TouchIDService = "aws-vault"
 ```
 
+`KeychainName` must also be set — biometrics only apply to a custom keychain, not
+the default login keychain. Touch ID is requested only when the OS reports that
+keychain as locked; an already-unlocked keychain is not re-prompted.
+
 ### Passage backend
 
 The Passage backend can select an identities file per keyring instance. If
