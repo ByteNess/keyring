@@ -829,3 +829,23 @@ func TestOPStandardKeyring_Malformed(t *testing.T) {
 		assert.Equal(t, "itemID1", opItemIDRemoved)
 	})
 }
+
+func TestOPStandardKeyring_KeysSkipsUnprefixedTitles(t *testing.T) {
+	noPrefix := newOPStandardTestItem(t, "itemID1", "key1")
+	noPrefix.Title = "key1"
+	noSeparator := newOPStandardTestItem(t, "itemID2", "key2")
+	noSeparator.Title = "itemTitlePrefixkey2"
+
+	keyring := newOPStandardTestKeyring()
+	NewOPStandardKeyringMock_GetItem(t, keyring, []onepassword.Item{
+		newOPStandardTestItem(t, "itemID0", "key0"),
+		noPrefix,
+		noSeparator,
+	})
+
+	keys, err := keyring.Keys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.ElementsMatch(t, []string{"key0"}, keys)
+}

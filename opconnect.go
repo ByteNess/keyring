@@ -191,7 +191,8 @@ func (k *OPConnectKeyring) pruneOPConnectItemOverviews(
 ) []connectop.Item {
 	pruned := []connectop.Item{}
 	for _, opConnectItemOverview := range opConnectItemOverviews {
-		if slices.Contains(opConnectItemOverview.Tags, k.ItemTag) &&
+		if k.hasOPItemTitlePrefix(opConnectItemOverview.Title) &&
+			slices.Contains(opConnectItemOverview.Tags, k.ItemTag) &&
 			opConnectItemOverview.Category == OPConnectItemCategory {
 			pruned = append(pruned, opConnectItemOverview)
 		}
