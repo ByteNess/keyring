@@ -119,7 +119,7 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 				}},
 				UpdatedAt: time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			}},
-			ErrKeyNotFound,
+			OPErrItemMalformed,
 		},
 		{
 			"opItemFieldTitleDuplicate",
@@ -147,7 +147,7 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 				},
 				UpdatedAt: time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			}},
-			ErrKeyNotFound,
+			OPErrItemMalformed,
 		},
 		{
 			"opItemFieldTypeMismatch",
@@ -167,7 +167,7 @@ func TestOPConnectKeyring_Get(t *testing.T) {
 				}},
 				UpdatedAt: time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			}},
-			ErrKeyNotFound,
+			OPErrItemMalformed,
 		},
 		{
 			"opItemDuplicate",
@@ -679,4 +679,166 @@ func newOPConnectKeyringMock_GetKeys(
 	).Maybe()
 
 	return opClientMock
+}
+
+func newOPConnectTestKeyring() *OPConnectKeyring {
+	return &OPConnectKeyring{
+		OPBaseKeyring: OPBaseKeyring{
+			VaultID:         "vaultID",
+			ItemTitlePrefix: "itemTitlePrefix",
+			ItemTag:         "itemTag",
+			ItemFieldTitle:  "itemFieldTitle",
+		},
+	}
+}
+
+func newOPConnectTestItem(t *testing.T, id, key string) connectop.Item {
+	t.Helper()
+	return connectop.Item{
+		ID:       id,
+		Title:    "itemTitlePrefix: " + key,
+		Tags:     []string{"itemTag"},
+		Vault:    connectop.ItemVault{ID: "vaultID"},
+		Category: connectop.ApiCredential,
+		Fields: []*connectop.ItemField{{
+			ID:    "itemFieldID",
+			Type:  connectop.FieldTypeConcealed,
+			Label: "itemFieldTitle",
+			Value: NewOPItemFieldValue(t, key, []byte(`data`)),
+		}},
+		UpdatedAt: time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
+	}
+}
+
+func newOPConnectTestItemMalformed(t *testing.T, id, key string) connectop.Item {
+	t.Helper()
+	opItem := newOPConnectTestItem(t, id, key)
+	opItem.Fields[0].Label = "itemFieldTitleMismatch"
+	return opItem
+}
+
+func TestOPConnectKeyring_SDKCalls(t *testing.T) {
+	opItemsExisting := []connectop.Item{
+		newOPConnectTestItem(t, "itemID0", "key0"),
+		newOPConnectTestItem(t, "itemID1", "key1"),
+		newOPConnectTestItem(t, "itemID2", "key2"),
+	}
+
+	t.Run("Keys", func(t *testing.T) {
+		keyring := newOPConnectTestKeyring()
+		opClientMock := newOPConnectKeyringMock_GetKeys(t, keyring, opItemsExisting)
+
+		if _, err := keyring.Keys(); err != nil {
+			t.Fatal(err)
+		}
+		opClientMock.AssertNumberOfCalls(t, "GetItems", 1)
+		opClientMock.AssertNumberOfCalls(t, "GetItemByUUID", 0)
+	})
+
+	t.Run("Get", func(t *testing.T) {
+		keyring := newOPConnectTestKeyring()
+		opClientMock := NewOPConnectKeyringMock_GetItem(t, keyring, "key1", opItemsExisting)
+
+		if _, err := keyring.Get("key1"); err != nil {
+			t.Fatal(err)
+		}
+		opClientMock.AssertNumberOfCalls(t, "GetItemsByTitle", 1)
+		opClientMock.AssertNumberOfCalls(t, "GetItemByUUID", 1)
+	})
+
+	t.Run("SetCreate", func(t *testing.T) {
+		keyring := newOPConnectTestKeyring()
+		var opItemSet connectop.Item
+		opClientMock := NewOPConnectKeyringMock_SetItem(
+			t, keyring, "new", "newItemID", "newItemFieldID", time.Time{}, opItemsExisting, &opItemSet,
+		)
+
+		if err := keyring.Set(Item{Key: "new", Data: []byte(`data`)}); err != nil {
+			t.Fatal(err)
+		}
+		opClientMock.AssertNumberOfCalls(t, "GetItemsByTitle", 1)
+		opClientMock.AssertNumberOfCalls(t, "GetItemByUUID", 0)
+		opClientMock.AssertNumberOfCalls(t, "CreateItem", 1)
+	})
+
+	t.Run("SetUpdate", func(t *testing.T) {
+		keyring := newOPConnectTestKeyring()
+		var opItemSet connectop.Item
+		opClientMock := NewOPConnectKeyringMock_SetItem(
+			t, keyring, "key1", "newItemID", "newItemFieldID", time.Time{}, opItemsExisting, &opItemSet,
+		)
+
+		if err := keyring.Set(Item{Key: "key1", Data: []byte(`data`)}); err != nil {
+			t.Fatal(err)
+		}
+		opClientMock.AssertNumberOfCalls(t, "GetItemsByTitle", 1)
+		opClientMock.AssertNumberOfCalls(t, "GetItemByUUID", 1)
+		opClientMock.AssertNumberOfCalls(t, "UpdateItem", 1)
+	})
+
+	t.Run("Remove", func(t *testing.T) {
+		keyring := newOPConnectTestKeyring()
+		var opItemIDRemoved string
+		opClientMock := NewOPConnectKeyringMock_RemoveItem(
+			t, keyring, "key1", opItemsExisting, &opItemIDRemoved,
+		)
+
+		if err := keyring.Remove("key1"); err != nil {
+			t.Fatal(err)
+		}
+		opClientMock.AssertNumberOfCalls(t, "GetItemsByTitle", 1)
+		opClientMock.AssertNumberOfCalls(t, "GetItemByUUID", 0)
+		opClientMock.AssertNumberOfCalls(t, "DeleteItemByID", 1)
+		assert.Equal(t, "itemID1", opItemIDRemoved)
+	})
+}
+
+func TestOPConnectKeyring_Malformed(t *testing.T) {
+	opItemsExisting := []connectop.Item{
+		newOPConnectTestItem(t, "itemID0", "key0"),
+		newOPConnectTestItemMalformed(t, "itemID1", "key1"),
+	}
+
+	t.Run("KeysListsIt", func(t *testing.T) {
+		keyring := newOPConnectTestKeyring()
+		newOPConnectKeyringMock_GetKeys(t, keyring, opItemsExisting)
+
+		keys, err := keyring.Keys()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.ElementsMatch(t, []string{"key0", "key1"}, keys)
+	})
+
+	t.Run("GetReportsIt", func(t *testing.T) {
+		keyring := newOPConnectTestKeyring()
+		NewOPConnectKeyringMock_GetItem(t, keyring, "key1", opItemsExisting)
+
+		_, err := keyring.Get("key1")
+		assert.ErrorIs(t, err, OPErrItemMalformed)
+	})
+
+	t.Run("SetRefusesIt", func(t *testing.T) {
+		keyring := newOPConnectTestKeyring()
+		var opItemSet connectop.Item
+		opClientMock := NewOPConnectKeyringMock_SetItem(
+			t, keyring, "key1", "newItemID", "newItemFieldID", time.Time{}, opItemsExisting, &opItemSet,
+		)
+
+		err := keyring.Set(Item{Key: "key1", Data: []byte(`data`)})
+		assert.ErrorIs(t, err, OPErrItemMalformed)
+		opClientMock.AssertNotCalled(t, "CreateItem", mock.Anything, mock.Anything)
+		opClientMock.AssertNotCalled(t, "UpdateItem", mock.Anything, mock.Anything)
+	})
+
+	t.Run("RemoveDeletesIt", func(t *testing.T) {
+		keyring := newOPConnectTestKeyring()
+		var opItemIDRemoved string
+		NewOPConnectKeyringMock_RemoveItem(t, keyring, "key1", opItemsExisting, &opItemIDRemoved)
+
+		if err := keyring.Remove("key1"); err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, "itemID1", opItemIDRemoved)
+	})
 }

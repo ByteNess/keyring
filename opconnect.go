@@ -120,11 +120,42 @@ func (k *OPConnectKeyring) InitializeOPConnectClient() error {
 	return nil
 }
 
-// GetOPItem returns the 1Password item matching the given key.
+// GetOPItem returns the 1Password item matching the given key, with only its
+// keyring field.
 func (k *OPConnectKeyring) GetOPItem(key string) (*onepassword.Item, error) {
+	opConnectItemOverview, err := k.getOPConnectItemOverview(key)
+	if err != nil {
+		return nil, err
+	}
+
+	opConnectItem, err := k.Client.GetItemByUUID(opConnectItemOverview.ID, k.VaultID)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"unable to get item with ID %#v from vault with ID %#v: %w",
+			opConnectItemOverview.ID,
+			k.VaultID,
+			err,
+		)
+	}
+
+	opItem, ok := k.getOPItemFromOPConnectItem(opConnectItem)
+	if !ok {
+		return nil, fmt.Errorf(
+			"%w: item with title %#v in vault with ID %#v",
+			OPErrItemMalformed,
+			opConnectItem.Title,
+			k.VaultID,
+		)
+	}
+	return &opItem, nil
+}
+
+// getOPConnectItemOverview returns the overview of the keyring item matching
+// the given key.
+func (k *OPConnectKeyring) getOPConnectItemOverview(key string) (*connectop.Item, error) {
 	opItemTitle := k.GetOPItemTitleFromKey(key)
 
-	opConnectItemOverviews, err := k.Client.GetItemsByTitle(opItemTitle, k.VaultID)
+	opConnectItemOverviewsAll, err := k.Client.GetItemsByTitle(opItemTitle, k.VaultID)
 	if err != nil {
 		return nil, fmt.Errorf(
 			"unable to get item overviews with title %#v from vault with ID %#v: %w",
@@ -134,39 +165,47 @@ func (k *OPConnectKeyring) GetOPItem(key string) (*onepassword.Item, error) {
 		)
 	}
 
-	opItems, err := k.PruneAndHydrateOPItemOverviews(opConnectItemOverviews)
-	if err != nil {
-		return nil, err
-	}
+	opConnectItemOverviews := k.pruneOPConnectItemOverviews(opConnectItemOverviewsAll)
 
-	if len(opItems) == 0 {
+	if len(opConnectItemOverviews) == 0 {
 		return nil, ErrKeyNotFound
 	}
-	if len(opItems) > 1 {
+	if len(opConnectItemOverviews) > 1 {
 		return nil, fmt.Errorf(
 			"%w: matched %v items with title %#v in vault with ID %#v",
 			OPErrItemMultiple,
-			len(opItems),
+			len(opConnectItemOverviews),
 			opItemTitle,
 			k.VaultID,
 		)
 	}
 
-	return &opItems[0], nil
+	return &opConnectItemOverviews[0], nil
+}
+
+// pruneOPConnectItemOverviews filters item overviews down to keyring items.
+// Keys, Get, Set and Remove all match items by this rule, so a key that Keys
+// returns can always be read or removed.
+func (k *OPConnectKeyring) pruneOPConnectItemOverviews(
+	opConnectItemOverviews []connectop.Item,
+) []connectop.Item {
+	pruned := []connectop.Item{}
+	for _, opConnectItemOverview := range opConnectItemOverviews {
+		if slices.Contains(opConnectItemOverview.Tags, k.ItemTag) &&
+			opConnectItemOverview.Category == OPConnectItemCategory {
+			pruned = append(pruned, opConnectItemOverview)
+		}
+	}
+	return pruned
 }
 
 // PruneAndHydrateOPItemOverviews filters item overviews down to keyring items
-// and fetches their full contents.
+// and fetches their full contents, skipping items without a valid keyring field.
 func (k *OPConnectKeyring) PruneAndHydrateOPItemOverviews(
 	opConnectItemOverviews []connectop.Item,
 ) ([]onepassword.Item, error) {
 	opItems := []onepassword.Item{}
-	for _, opConnectItemOverview := range opConnectItemOverviews {
-		if !slices.Contains(opConnectItemOverview.Tags, k.ItemTag) ||
-			opConnectItemOverview.Category != OPConnectItemCategory {
-			continue
-		}
-
+	for _, opConnectItemOverview := range k.pruneOPConnectItemOverviews(opConnectItemOverviews) {
 		opConnectItem, err := k.Client.GetItemByUUID(opConnectItemOverview.ID, k.VaultID)
 		if err != nil {
 			return nil, fmt.Errorf(
@@ -177,34 +216,47 @@ func (k *OPConnectKeyring) PruneAndHydrateOPItemOverviews(
 			)
 		}
 
-		opItemFields := []onepassword.ItemField{}
-		for _, opConnectItemField := range opConnectItem.Fields {
-			if opConnectItemField.Type == OPConnectItemFieldType {
-				opItemFields = append(opItemFields, onepassword.ItemField{
-					ID:        opConnectItemField.ID,
-					Title:     opConnectItemField.Label,
-					FieldType: OPStandardItemFieldType,
-					Value:     opConnectItemField.Value,
-				})
-			}
-		}
-
-		if len(opItemFields) != 1 || opItemFields[0].Title != k.ItemFieldTitle {
+		opItem, ok := k.getOPItemFromOPConnectItem(opConnectItem)
+		if !ok {
 			continue
 		}
-
-		opItems = append(opItems, onepassword.Item{
-			ID:        opConnectItem.ID,
-			Title:     opConnectItem.Title,
-			Category:  OPStandardItemCategory,
-			VaultID:   opConnectItem.Vault.ID,
-			Fields:    opItemFields,
-			Tags:      opConnectItem.Tags,
-			UpdatedAt: opConnectItem.UpdatedAt,
-		})
+		opItems = append(opItems, opItem)
 	}
 
 	return opItems, nil
+}
+
+// getOPItemFromOPConnectItem converts a Connect item to a 1Password item with
+// only its keyring field, provided it has exactly one concealed field and that
+// field has the keyring field title.
+func (k *OPConnectKeyring) getOPItemFromOPConnectItem(
+	opConnectItem *connectop.Item,
+) (onepassword.Item, bool) {
+	opItemFields := []onepassword.ItemField{}
+	for _, opConnectItemField := range opConnectItem.Fields {
+		if opConnectItemField.Type == OPConnectItemFieldType {
+			opItemFields = append(opItemFields, onepassword.ItemField{
+				ID:        opConnectItemField.ID,
+				Title:     opConnectItemField.Label,
+				FieldType: OPStandardItemFieldType,
+				Value:     opConnectItemField.Value,
+			})
+		}
+	}
+
+	if len(opItemFields) != 1 || opItemFields[0].Title != k.ItemFieldTitle {
+		return onepassword.Item{}, false
+	}
+
+	return onepassword.Item{
+		ID:        opConnectItem.ID,
+		Title:     opConnectItem.Title,
+		Category:  OPStandardItemCategory,
+		VaultID:   opConnectItem.Vault.ID,
+		Fields:    opItemFields,
+		Tags:      opConnectItem.Tags,
+		UpdatedAt: opConnectItem.UpdatedAt,
+	}, true
 }
 
 // Get returns the Item matching the given key, or ErrKeyNotFound.
@@ -293,15 +345,15 @@ func (k OPConnectKeyring) Remove(key string) error {
 		return err
 	}
 
-	opItem, err := k.GetOPItem(key)
+	opConnectItemOverview, err := k.getOPConnectItemOverview(key)
 	if err != nil {
 		return err
 	}
 
-	if err := k.Client.DeleteItemByID(opItem.ID, k.VaultID); err != nil {
+	if err := k.Client.DeleteItemByID(opConnectItemOverview.ID, k.VaultID); err != nil {
 		return fmt.Errorf(
 			"unable to delete item with ID %#v in vault with ID %#v: %w",
-			opItem.ID,
+			opConnectItemOverview.ID,
 			k.VaultID,
 			err,
 		)
@@ -334,21 +386,26 @@ func (k OPConnectKeyring) Keys() ([]string, error) {
 		return nil, err
 	}
 
-	opItems, err := k.GetOPItems()
+	opConnectItemOverviewsAll, err := k.Client.GetItems(k.VaultID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(
+			"unable to get item overviews from vault with ID %#v: %w",
+			k.VaultID,
+			err,
+		)
 	}
+	opConnectItemOverviews := k.pruneOPConnectItemOverviews(opConnectItemOverviewsAll)
 
 	opItemTitles := []string{}
 	keys := []string{}
-	for _, opItem := range opItems {
-		if !slices.Contains(opItemTitles, opItem.Title) {
-			opItemTitles = append(opItemTitles, opItem.Title)
-			keys = append(keys, k.GetKeyFromOPItemTitle(opItem.Title))
+	for _, opConnectItemOverview := range opConnectItemOverviews {
+		if !slices.Contains(opItemTitles, opConnectItemOverview.Title) {
+			opItemTitles = append(opItemTitles, opConnectItemOverview.Title)
+			keys = append(keys, k.GetKeyFromOPItemTitle(opConnectItemOverview.Title))
 		}
 	}
 
-	if len(opItemTitles) != len(opItems) {
+	if len(opItemTitles) != len(opConnectItemOverviews) {
 		return nil, fmt.Errorf(
 			"%w in vault with ID %#v: %#v",
 			OPErrItemTitleDuplicate,
