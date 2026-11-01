@@ -120,7 +120,7 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 				Tags:      []string{"itemTag"},
 				UpdatedAt: time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			}},
-			ErrKeyNotFound,
+			OPErrItemMalformed,
 		},
 		{
 			"opItemFieldTitleDuplicate",
@@ -148,7 +148,7 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 				Tags:      []string{"itemTag"},
 				UpdatedAt: time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			}},
-			ErrKeyNotFound,
+			OPErrItemMalformed,
 		},
 		{
 			"opItemFieldTypeMismatch",
@@ -168,7 +168,7 @@ func TestOPStandardKeyring_Get(t *testing.T) {
 				Tags:      []string{"itemTag"},
 				UpdatedAt: time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
 			}},
-			ErrKeyNotFound,
+			OPErrItemMalformed,
 		},
 		{
 			"opItemDuplicate",
@@ -683,4 +683,149 @@ func NewOPStandardKeyringMock_RemoveItem(
 	).Maybe()
 
 	return opClientMock
+}
+
+func newOPStandardTestKeyring() *OPStandardKeyring {
+	return &OPStandardKeyring{
+		OPBaseKeyring: OPBaseKeyring{
+			VaultID:         "vaultID",
+			ItemTitlePrefix: "itemTitlePrefix",
+			ItemTag:         "itemTag",
+			ItemFieldTitle:  "itemFieldTitle",
+		},
+	}
+}
+
+func newOPStandardTestItem(t *testing.T, id, key string) onepassword.Item {
+	t.Helper()
+	return onepassword.Item{
+		ID:       id,
+		Title:    "itemTitlePrefix: " + key,
+		Category: OPStandardItemCategory,
+		VaultID:  "vaultID",
+		Fields: []onepassword.ItemField{{
+			ID:        "itemFieldID",
+			Title:     "itemFieldTitle",
+			FieldType: OPStandardItemFieldType,
+			Value:     NewOPItemFieldValue(t, key, []byte(`data`)),
+		}},
+		Tags:      []string{"itemTag"},
+		UpdatedAt: time.Date(1955, 11, 5, 11, 0, 0, 0, time.UTC),
+	}
+}
+
+func newOPStandardTestItemMalformed(t *testing.T, id, key string) onepassword.Item {
+	t.Helper()
+	opItem := newOPStandardTestItem(t, id, key)
+	opItem.Fields[0].Title = "itemFieldTitleMismatch"
+	return opItem
+}
+
+func TestOPStandardKeyring_SDKCalls(t *testing.T) {
+	opItemsExisting := []onepassword.Item{
+		newOPStandardTestItem(t, "itemID0", "key0"),
+		newOPStandardTestItem(t, "itemID1", "key1"),
+		newOPStandardTestItem(t, "itemID2", "key2"),
+	}
+
+	testCases := []struct {
+		name    string
+		run     func(k *OPStandardKeyring) error
+		gets    int
+		creates int
+		puts    int
+		deletes int
+	}{
+		{"Keys", func(k *OPStandardKeyring) error { _, err := k.Keys(); return err }, 0, 0, 0, 0},
+		{"Get", func(k *OPStandardKeyring) error { _, err := k.Get("key1"); return err }, 1, 0, 0, 0},
+		{"GetMissing", func(k *OPStandardKeyring) error {
+			if _, err := k.Get("missing"); !errors.Is(err, ErrKeyNotFound) {
+				return err
+			}
+			return nil
+		}, 0, 0, 0, 0},
+		{"SetCreate", func(k *OPStandardKeyring) error { return k.Set(Item{Key: "new", Data: []byte(`data`)}) }, 0, 1, 0, 0},
+		{"SetUpdate", func(k *OPStandardKeyring) error { return k.Set(Item{Key: "key1", Data: []byte(`data`)}) }, 1, 0, 1, 0},
+		{"Remove", func(k *OPStandardKeyring) error { return k.Remove("key1") }, 0, 0, 0, 1},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			keyring := newOPStandardTestKeyring()
+			var opItemSet onepassword.Item
+			opClientMock := NewOPStandardKeyringMock_SetItem(
+				t, keyring, "newItemID", "newItemFieldID", time.Time{}, opItemsExisting, &opItemSet,
+			)
+			var opItemIDRemoved string
+			opClientMock.On("Delete", mock.Anything, keyring.VaultID, mock.Anything).Return(
+				func(_ context.Context, _ string, opItemID string) error {
+					opItemIDRemoved = opItemID
+					return nil
+				},
+			).Maybe()
+
+			if err := tt.run(keyring); err != nil {
+				t.Fatal(err)
+			}
+
+			opClientMock.AssertNumberOfCalls(t, "List", 1)
+			opClientMock.AssertNumberOfCalls(t, "Get", tt.gets)
+			opClientMock.AssertNumberOfCalls(t, "Create", tt.creates)
+			opClientMock.AssertNumberOfCalls(t, "Put", tt.puts)
+			opClientMock.AssertNumberOfCalls(t, "Delete", tt.deletes)
+			if tt.deletes == 1 {
+				assert.Equal(t, "itemID1", opItemIDRemoved)
+			}
+		})
+	}
+}
+
+func TestOPStandardKeyring_Malformed(t *testing.T) {
+	opItemsExisting := []onepassword.Item{
+		newOPStandardTestItem(t, "itemID0", "key0"),
+		newOPStandardTestItemMalformed(t, "itemID1", "key1"),
+	}
+
+	t.Run("KeysListsIt", func(t *testing.T) {
+		keyring := newOPStandardTestKeyring()
+		NewOPStandardKeyringMock_GetItem(t, keyring, opItemsExisting)
+
+		keys, err := keyring.Keys()
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.ElementsMatch(t, []string{"key0", "key1"}, keys)
+	})
+
+	t.Run("GetReportsIt", func(t *testing.T) {
+		keyring := newOPStandardTestKeyring()
+		NewOPStandardKeyringMock_GetItem(t, keyring, opItemsExisting)
+
+		_, err := keyring.Get("key1")
+		assert.ErrorIs(t, err, OPErrItemMalformed)
+	})
+
+	t.Run("SetRefusesIt", func(t *testing.T) {
+		keyring := newOPStandardTestKeyring()
+		var opItemSet onepassword.Item
+		opClientMock := NewOPStandardKeyringMock_SetItem(
+			t, keyring, "newItemID", "newItemFieldID", time.Time{}, opItemsExisting, &opItemSet,
+		)
+
+		err := keyring.Set(Item{Key: "key1", Data: []byte(`data`)})
+		assert.ErrorIs(t, err, OPErrItemMalformed)
+		opClientMock.AssertNotCalled(t, "Create", mock.Anything, mock.Anything)
+		opClientMock.AssertNotCalled(t, "Put", mock.Anything, mock.Anything)
+	})
+
+	t.Run("RemoveDeletesIt", func(t *testing.T) {
+		keyring := newOPStandardTestKeyring()
+		var opItemIDRemoved string
+		NewOPStandardKeyringMock_RemoveItem(t, keyring, opItemsExisting, &opItemIDRemoved)
+
+		if err := keyring.Remove("key1"); err != nil {
+			t.Fatal(err)
+		}
+		assert.Equal(t, "itemID1", opItemIDRemoved)
+	})
 }

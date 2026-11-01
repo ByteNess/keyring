@@ -28,6 +28,9 @@ var (
 	OPErrClient        = errors.New(
 		"unable to create a 1Password Connect / Service Accounts / Desktop Integration client",
 	)
+	OPErrItemMalformed = errors.New(
+		"found 1Password item without exactly one concealed field with the expected title",
+	)
 	OPErrItemMultiple       = errors.New("found multiple matching 1Password items")
 	OPErrItemTitleDuplicate = errors.New("found duplicate 1Password item title")
 	OPErrKeyring            = errors.New(

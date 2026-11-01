@@ -27,44 +27,67 @@ type OPStandardKeyring struct {
 	Client  OPStandardClientAPI
 }
 
-// GetOPItem returns the 1Password item matching the given key.
+// GetOPItem returns the 1Password item matching the given key, with only its
+// keyring field.
 func (k *OPStandardKeyring) GetOPItem(key string) (*onepassword.Item, error) {
-	opItemsAll, err := k.GetOPItems()
+	opItemOverview, err := k.getOPItemOverview(key)
 	if err != nil {
 		return nil, err
 	}
 
-	opItemTitle := k.GetOPItemTitleFromKey(key)
-
-	opItems := []onepassword.Item{}
-	for _, opItem := range opItemsAll {
-		if opItem.Title == opItemTitle {
-			opItems = append(opItems, opItem)
-		}
+	opItem, err := k.fetchOPItem(opItemOverview.ID)
+	if err != nil {
+		return nil, err
 	}
 
-	if len(opItems) == 0 {
-		return nil, ErrKeyNotFound
-	}
-	if len(opItems) > 1 {
+	opItemField, ok := k.getOPItemKeyringField(opItem)
+	if !ok {
 		return nil, fmt.Errorf(
-			"%w: matched %v items with title %#v in vault with ID %#v",
-			OPErrItemMultiple,
-			len(opItems),
-			opItemTitle,
+			"%w: item with title %#v in vault with ID %#v",
+			OPErrItemMalformed,
+			opItem.Title,
 			k.VaultID,
 		)
 	}
-	return &opItems[0], nil
+	opItem.Fields = []onepassword.ItemField{opItemField}
+	return &opItem, nil
 }
 
 // GetOPItems returns all keyring items from the configured vault.
 func (k *OPStandardKeyring) GetOPItems() ([]onepassword.Item, error) {
-	ctxOuter, cancelOuter := context.WithTimeout(context.Background(), k.Timeout)
-	defer cancelOuter()
+	opItemOverviews, err := k.listOPItemOverviews()
+	if err != nil {
+		return nil, err
+	}
+
+	opItems := []onepassword.Item{}
+	for _, opItemOverview := range opItemOverviews {
+		opItem, err := k.fetchOPItem(opItemOverview.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		opItemField, ok := k.getOPItemKeyringField(opItem)
+		if !ok {
+			continue
+		}
+
+		opItem.Fields = []onepassword.ItemField{opItemField}
+		opItems = append(opItems, opItem)
+	}
+
+	return opItems, nil
+}
+
+// listOPItemOverviews returns the overviews of all keyring items in the
+// configured vault. Keys, Get, Set and Remove all match items by this rule, so
+// a key that Keys returns can always be read or removed.
+func (k *OPStandardKeyring) listOPItemOverviews() ([]onepassword.ItemOverview, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), k.Timeout)
+	defer cancel()
 
 	itemOverviews, err := k.Client.List(
-		ctxOuter,
+		ctx,
 		k.VaultID,
 		onepassword.NewItemListFilterTypeVariantByState(
 			&onepassword.ItemListFilterByStateInner{Active: true},
@@ -74,43 +97,78 @@ func (k *OPStandardKeyring) GetOPItems() ([]onepassword.Item, error) {
 		return nil, fmt.Errorf("unable to list items from vault with ID %#v: %w", k.VaultID, err)
 	}
 
-	opItems := []onepassword.Item{}
+	opItemOverviews := []onepassword.ItemOverview{}
 	for _, itemOverview := range itemOverviews {
-		if !slices.Contains(itemOverview.Tags, k.ItemTag) ||
-			itemOverview.State != onepassword.ItemStateActive ||
-			itemOverview.Category != OPStandardItemCategory {
-			continue
+		if slices.Contains(itemOverview.Tags, k.ItemTag) &&
+			itemOverview.State == onepassword.ItemStateActive &&
+			itemOverview.Category == OPStandardItemCategory {
+			opItemOverviews = append(opItemOverviews, itemOverview)
 		}
+	}
+	return opItemOverviews, nil
+}
 
-		ctxInner, cancelInner := context.WithTimeout(context.Background(), k.Timeout)
-		defer cancelInner()
-
-		opItem, err := k.Client.Get(ctxInner, k.VaultID, itemOverview.ID)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"unable to get item with ID %#v from vault with ID %#v: %w",
-				itemOverview.ID,
-				k.VaultID,
-				err,
-			)
-		}
-
-		opItemFields := []onepassword.ItemField{}
-		for _, opItemField := range opItem.Fields {
-			if opItemField.FieldType == OPStandardItemFieldType {
-				opItemFields = append(opItemFields, opItemField)
-			}
-		}
-
-		if len(opItemFields) != 1 || opItemFields[0].Title != k.ItemFieldTitle {
-			continue
-		}
-
-		opItem.Fields = opItemFields
-		opItems = append(opItems, opItem)
+// getOPItemOverview returns the overview of the keyring item matching the given key.
+func (k *OPStandardKeyring) getOPItemOverview(key string) (*onepassword.ItemOverview, error) {
+	opItemOverviewsAll, err := k.listOPItemOverviews()
+	if err != nil {
+		return nil, err
 	}
 
-	return opItems, nil
+	opItemTitle := k.GetOPItemTitleFromKey(key)
+
+	opItemOverviews := []onepassword.ItemOverview{}
+	for _, opItemOverview := range opItemOverviewsAll {
+		if opItemOverview.Title == opItemTitle {
+			opItemOverviews = append(opItemOverviews, opItemOverview)
+		}
+	}
+
+	if len(opItemOverviews) == 0 {
+		return nil, ErrKeyNotFound
+	}
+	if len(opItemOverviews) > 1 {
+		return nil, fmt.Errorf(
+			"%w: matched %v items with title %#v in vault with ID %#v",
+			OPErrItemMultiple,
+			len(opItemOverviews),
+			opItemTitle,
+			k.VaultID,
+		)
+	}
+	return &opItemOverviews[0], nil
+}
+
+func (k *OPStandardKeyring) fetchOPItem(opItemID string) (onepassword.Item, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), k.Timeout)
+	defer cancel()
+
+	opItem, err := k.Client.Get(ctx, k.VaultID, opItemID)
+	if err != nil {
+		return onepassword.Item{}, fmt.Errorf(
+			"unable to get item with ID %#v from vault with ID %#v: %w",
+			opItemID,
+			k.VaultID,
+			err,
+		)
+	}
+	return opItem, nil
+}
+
+// getOPItemKeyringField returns the item's only concealed field, provided it
+// has the keyring field title.
+func (k *OPStandardKeyring) getOPItemKeyringField(
+	opItem onepassword.Item,
+) (onepassword.ItemField, bool) {
+	var opItemField onepassword.ItemField
+	concealed := 0
+	for _, field := range opItem.Fields {
+		if field.FieldType == OPStandardItemFieldType {
+			opItemField = field
+			concealed++
+		}
+	}
+	return opItemField, concealed == 1 && opItemField.Title == k.ItemFieldTitle
 }
 
 // Get returns the Item matching the given key, or ErrKeyNotFound.
@@ -192,7 +250,7 @@ func (k OPStandardKeyring) Set(item Item) error {
 
 // Remove deletes the item with the matching key.
 func (k OPStandardKeyring) Remove(key string) error {
-	opItem, err := k.GetOPItem(key)
+	opItemOverview, err := k.getOPItemOverview(key)
 	if err != nil {
 		return err
 	}
@@ -200,10 +258,10 @@ func (k OPStandardKeyring) Remove(key string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), k.Timeout)
 	defer cancel()
 
-	if err := k.Client.Delete(ctx, k.VaultID, opItem.ID); err != nil {
+	if err := k.Client.Delete(ctx, k.VaultID, opItemOverview.ID); err != nil {
 		return fmt.Errorf(
 			"unable to delete item with ID %#v in vault with ID %#v: %w",
-			opItem.ID,
+			opItemOverview.ID,
 			k.VaultID,
 			err,
 		)
@@ -213,21 +271,21 @@ func (k OPStandardKeyring) Remove(key string) error {
 
 // Keys returns a slice of all keys stored on the keyring.
 func (k OPStandardKeyring) Keys() ([]string, error) {
-	opItems, err := k.GetOPItems()
+	opItemOverviews, err := k.listOPItemOverviews()
 	if err != nil {
 		return nil, err
 	}
 
 	opItemTitles := []string{}
 	keys := []string{}
-	for _, opItem := range opItems {
-		if !slices.Contains(opItemTitles, opItem.Title) {
-			opItemTitles = append(opItemTitles, opItem.Title)
-			keys = append(keys, k.GetKeyFromOPItemTitle(opItem.Title))
+	for _, opItemOverview := range opItemOverviews {
+		if !slices.Contains(opItemTitles, opItemOverview.Title) {
+			opItemTitles = append(opItemTitles, opItemOverview.Title)
+			keys = append(keys, k.GetKeyFromOPItemTitle(opItemOverview.Title))
 		}
 	}
 
-	if len(opItemTitles) != len(opItems) {
+	if len(opItemTitles) != len(opItemOverviews) {
 		return nil, fmt.Errorf(
 			"%w in vault with ID %#v: %#v",
 			OPErrItemTitleDuplicate,
