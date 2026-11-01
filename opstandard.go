@@ -99,7 +99,8 @@ func (k *OPStandardKeyring) listOPItemOverviews() ([]onepassword.ItemOverview, e
 
 	opItemOverviews := []onepassword.ItemOverview{}
 	for _, itemOverview := range itemOverviews {
-		if slices.Contains(itemOverview.Tags, k.ItemTag) &&
+		if k.hasOPItemTitlePrefix(itemOverview.Title) &&
+			slices.Contains(itemOverview.Tags, k.ItemTag) &&
 			itemOverview.State == onepassword.ItemStateActive &&
 			itemOverview.Category == OPStandardItemCategory {
 			opItemOverviews = append(opItemOverviews, itemOverview)

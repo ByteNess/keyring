@@ -83,6 +83,12 @@ func (k *OPBaseKeyring) GetOPItemFieldValueFromItem(item *Item) (string, error) 
 	return string(opItemFieldValueBytes), nil
 }
 
+// hasOPItemTitlePrefix reports whether a 1Password item title was derived from
+// a keyring key.
+func (k *OPBaseKeyring) hasOPItemTitlePrefix(opItemTitle string) bool {
+	return strings.HasPrefix(opItemTitle, k.ItemTitlePrefix+OPItemTitlePrefixKeySep)
+}
+
 // GetOPItemTitleFromKey derives the 1Password item title from a keyring key.
 func (k *OPBaseKeyring) GetOPItemTitleFromKey(key string) string {
 	return k.ItemTitlePrefix + OPItemTitlePrefixKeySep + key

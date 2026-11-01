@@ -842,3 +842,23 @@ func TestOPConnectKeyring_Malformed(t *testing.T) {
 		assert.Equal(t, "itemID1", opItemIDRemoved)
 	})
 }
+
+func TestOPConnectKeyring_KeysSkipsUnprefixedTitles(t *testing.T) {
+	noPrefix := newOPConnectTestItem(t, "itemID1", "key1")
+	noPrefix.Title = "key1"
+	noSeparator := newOPConnectTestItem(t, "itemID2", "key2")
+	noSeparator.Title = "itemTitlePrefixkey2"
+
+	keyring := newOPConnectTestKeyring()
+	newOPConnectKeyringMock_GetKeys(t, keyring, []connectop.Item{
+		newOPConnectTestItem(t, "itemID0", "key0"),
+		noPrefix,
+		noSeparator,
+	})
+
+	keys, err := keyring.Keys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.ElementsMatch(t, []string{"key0"}, keys)
+}
