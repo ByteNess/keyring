@@ -1,6 +1,6 @@
 module github.com/byteness/keyring
 
-go 1.26.0
+go 1.27
 
 // v1.6.0 was a broken test
 retract v1.6.0
