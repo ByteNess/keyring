@@ -4,6 +4,13 @@ import (
 	"time"
 )
 
+// Key sources for the oo7 backend, see Config.OO7KeySource.
+const (
+	OO7KeySourceAuto       = "auto"
+	OO7KeySourcePortal     = "portal"
+	OO7KeySourcePassphrase = "passphrase"
+)
+
 // Config contains configuration for keyring.
 type Config struct {
 	// AllowedBackends is a whitelist of backend providers that can be used. Nil means all available.
@@ -124,4 +131,19 @@ type Config struct {
 	// ProtonPassTokenFunc is an optional function used to prompt for the PAT when no
 	// config field or environment variable supplies one.
 	ProtonPassTokenFunc PromptFunc
+
+	// OO7KeyringPath is the oo7 keyring file used by the oo7 backend, ~/ is resolved to the
+	// users' home dir. Empty selects $XDG_DATA_HOME/<ServiceName>/keyrings/default.keyring, see
+	// OO7DefaultKeyringPath.
+	OO7KeyringPath string
+
+	// OO7KeySource selects where the oo7 keyring's encryption secret comes from: "portal" (the
+	// Secret portal's per-application secret, no prompt), "passphrase" (OO7PasswordFunc) or
+	// "auto" (portal inside a Flatpak or Snap sandbox, passphrase otherwise). Empty means
+	// "auto". A keyring created with one source cannot be opened with the other.
+	OO7KeySource string
+
+	// OO7PasswordFunc prompts the user for the oo7 keyring passphrase when the Secret portal is
+	// not used.
+	OO7PasswordFunc PromptFunc
 }

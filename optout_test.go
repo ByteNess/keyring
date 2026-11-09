@@ -1,4 +1,4 @@
-//go:build keyring_no1password && keyring_nofile && keyring_nopass && keyring_nopassage
+//go:build keyring_no1password && keyring_nofile && keyring_nopass && keyring_nopassage && keyring_nooo7
 
 package keyring
 
@@ -19,6 +19,7 @@ func TestOptOutTagsExcludeBackends(t *testing.T) {
 		FileBackend,
 		PassBackend,
 		PassageBackend,
+		OO7Backend,
 	}
 
 	available := AvailableBackends()
