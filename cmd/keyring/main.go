@@ -53,6 +53,7 @@ func main() {
 		ServiceName:     *serviceName,
 		AllowedBackends: allowedBackends,
 		KeychainName:    *keychainName,
+		OO7PasswordFunc: keyring.TerminalPrompt,
 	})
 	if err != nil {
 		log.Fatal(err)

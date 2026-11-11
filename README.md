@@ -13,7 +13,7 @@ Currently Keyring supports the following backends
  * [macOS Keychain](https://support.apple.com/en-au/guide/keychain-access/welcome/mac) (with TouchID support 🎉)
  * [Windows Credential Manager](https://support.microsoft.com/en-au/help/4026814/windows-accessing-credential-manager)
  * [Windows Hello](https://support.microsoft.com/en-us/windows/configure-windows-hello-dae28983-8242-bb2a-d3d1-87c9d265a5f0)-gated encrypted Credential Manager backend
- * Secret Service ([Gnome Keyring](https://wiki.gnome.org/Projects/GnomeKeyring), [KWallet](https://kde.org/applications/system/org.kde.kwalletmanager5))
+ * Secret Service ([Gnome Keyring](https://wiki.gnome.org/Projects/GnomeKeyring), [oo7-daemon](https://github.com/linux-credentials/oo7), [KWallet](https://kde.org/applications/system/org.kde.kwalletmanager5))
  * [KWallet](https://kde.org/applications/system/org.kde.kwalletmanager5)
  * [Pass](https://www.passwordstore.org/)
  * [Passage](https://github.com/FiloSottile/passage)
@@ -23,6 +23,7 @@ Currently Keyring supports the following backends
  * [1Password Service Accounts](https://developer.1password.com/docs/service-accounts)
  * [1Password Desktop Application Integration](https://developer.1password.com/docs/sdks/desktop-app-integrations/)
  * [Proton Pass](https://proton.me/pass) (Note: **experimental**)
+ * [oo7](https://github.com/linux-credentials/oo7) keyring files, encrypted with a passphrase or, in a sandbox, the Secret portal's per-application secret (Linux)
 
 ## Usage
 
@@ -72,6 +73,33 @@ if err != nil {
   return err
 }
 ```
+
+### oo7 keyring file backend
+
+The `oo7` backend reads and writes [oo7](https://github.com/linux-credentials/oo7) keyring files
+(the format behind `oo7-daemon`, the Secret Service implementation GNOME is moving to) without
+going through D-Bus, so no daemon has to be running or able to prompt, and it works over SSH or
+inside a sandbox. Items are kept in their own file, `$XDG_DATA_HOME/<ServiceName>/keyrings/default.keyring`
+by default, which `oo7-cli -k <file> -s <secret>` can also open. The default deliberately stays out of
+`$XDG_DATA_HOME/keyrings/v1`, which `oo7-daemon` scans on startup and would otherwise expose as one of
+its collections. Build with `-tags keyring_nooo7` to leave the backend unregistered; the file format
+code stays, as it is portable and unit tested on every platform.
+
+```go
+ring, err := keyring.Open(keyring.Config{
+  AllowedBackends: []keyring.BackendType{keyring.OO7Backend},
+  ServiceName:     "example",
+  OO7KeyringPath:  "~/.local/share/example/keyrings/default.keyring", // optional
+  OO7KeySource:    keyring.OO7KeySourceAuto,                     // auto, portal or passphrase
+  OO7PasswordFunc: keyring.TerminalPrompt,
+})
+```
+
+`auto` uses the [Secret portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Secret.html)
+inside a Flatpak or Snap sandbox, as oo7's own client does, and the passphrase prompt otherwise.
+A keyring created with one key source cannot be opened with the other. The portal hands out one
+secret per application, so inside a sandbox everything running in that application can open the keyring.
+`ServiceName` names a folder in the default path and must not contain `/` or be `..`.
 
 ### Windows Hello backend
 
@@ -153,6 +181,7 @@ from compilation:
 | `keyring_nofile` | `file` | `dvsekhvalnov/jose2go` |
 | `keyring_nopass` | `pass` | none (shells out to `pass`) |
 | `keyring_nopassage` | `passage` | none (shells out to `passage`) |
+| `keyring_nooo7` | `oo7` | none (standard library crypto; `godbus` is shared with `secret-service`) |
 
 ```bash
 go build -tags keyring_no1password ./...
@@ -160,7 +189,8 @@ go build -tags keyring_no1password ./...
 
 The platform-specific backends (`keychain`, `wincred`, `winhello`,
 `secret-service`, `kwallet`, `keyctl`) are already gated by GOOS constraints
-and need no tags. Default builds (no tags) are unaffected. An excluded backend
+and need no tags; `oo7` is Linux-only as well but takes a tag because it is
+an opt-in backend. Default builds (no tags) are unaffected. An excluded backend
 is simply absent from `AvailableBackends()`, and requesting it explicitly
 returns `ErrNoAvailImpl` — the same behavior as a backend that's unavailable
 on the current platform. The `BackendType` constants and `Config` fields are
